@@ -1,0 +1,11 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calcMonAnomTXXX.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/cd_string.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/clmMonTXXX.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/kf_filter.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/nchoosek.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/NCL_GETools.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/run_cor.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/time_axis_labels.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/ut_string.ncl"
+

@@ -1,0 +1,12 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/ccm_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/popRemap.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/skewt_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/wind_rose.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+;(data,dimsize,dimnames,geoinfo[latS,latN,lonW,lonE],longname,units,opttime,optlev)
+load "$nclfx/addmeta.ncl" 
