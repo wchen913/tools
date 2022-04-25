@@ -1,0 +1,79 @@
+
+clear all; clc;
+%addpath('/data/srb1/wchen/tools/m_fx/','-end')
+addpath('/Users/wenchen/fx/m_fx//','-end')
+
+pth       = './';
+StOrg     = 'SURFRAD';
+EstOrg    = 'UMD_and_LIS3INSTAVGS';%'UMD_and_LIS3AVGDT';%
+
+nStd      = 0;
+FigName   = ['./heatscatters_ssda_',EstOrg,'_vs_',StOrg,'_st_all'];         
+if nStd == 0
+    optOut = 'no';
+else
+    optOut = 'yes';   
+end
+xlim	 = [0 500];ylim     = xlim;
+nxbin	 = 100;nybin    = nxbin;
+
+StLon       = [-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62];
+StLat       = [  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73]	;
+nSt         = length(StLat);
+ stid  		= {'dra', 'bon', 'gwn','fpk','tbl','psu','sxf'};
+%++++++++++
+%Estimation
+%++++++++++
+ 
+     
+% ssda_SURFRAD_7st_daily_20131001_20150831.nc
+%ssda_UMD_and_LIS3INSTAVGS_4_SURFRAD_7st_daily_20131001_20150831.nc
+ estfname = [pth,'ssda_',EstOrg,'_4_SURFRAD_7st_daily_20131001_20150831.nc'];
+ ncdisp(estfname)
+ estdata  = ncread(estfname,'ssda');
+ estdata(estdata<0)=NaN;
+ %whos estdata
+ 
+ stfname  = [pth,'ssda_SURFRAD_7st_daily_20131001_20150831.nc']; 
+ ncdisp(stfname)
+ stdata	  = ncread(stfname,'ssda');
+ stdata(stdata<0)=NaN;
+ 
+ nt  = length(stdata);
+ t   = 1:nt;
+ lbs = {'(a)','(b)','(c)','(d)','(e)','(f)','(g)','(h)','(i)','(j)','(k)','(l)'};
+ figure()
+ set(gcf,'position',[5,5,1000,2000]);
+ xlim=[1 nt];ylim=[1 700];hgt=0.14;
+ for ist=1:3
+    x = squeeze(stdata(ist,:));
+%     disp([min(x),max(x)])
+    y1 = squeeze(estdata(1,ist,:));
+%     disp([min(y1),max(y1)])
+    y2 = squeeze(estdata(2,ist,:));
+%     disp([min(y2),max(y2)])
+ 
+    tistrs  = {'SW{\downarrow} (W/m^{2})','Time',[char(lbs(ist)),' ',char(upper(stid(ist)))]};
+   
+     ax(ist)=subplot(7,1,ist);
+     hgt=0.125;
+     lftp = 0.1;btmp=0.05+(ist-1)*hgt;
+     set(gca,'position',[lftp,btmp,0.80,hgt]);
+     plt_lines(t,x,y1,y2,xlim,ylim,2.5,18,18,tistrs);
+ end
+ linkaxes(ax, 'y');
+ ylbl = ylabel(tistrs(1));set(ylbl,'fontsize',18,'fontweight','bold','FontName', 'Times');
+
+ function hdl=plt_lines(x,y1,y2,y3,xlim,ylim,lnthk,ftsz1,ftsz2,strs)
+    plot(x,y1,x,y2,x,y3)
+    %set(gca,'position',[0.08,0.15,0.80,0.4]);
+    set(gca,'xlim',xlim,'ylim',ylim);
+    set(gca,'linewidth',lnthk,'FontSize', ftsz2,'fontweight','bold','FontName', 'Times')
+%     hold on;
+    h=xlabel(strs(2));set(h,'fontsize',ftsz1,'fontweight','bold','FontName', 'Times'); clear h;        
+%     h=ylabel(strs(1));set(h,'fontsize',ftsz1,'fontweight','bold','FontName', 'Times'); clear h;
+    h=text(0.1,0.85,strs(3),'units','normalized');set(h,'fontsize',ftsz2,'fontweight','bold','FontName','Times'); clear h;
+    hdl=gca;
+     box off;
+%     hold off;
+ end

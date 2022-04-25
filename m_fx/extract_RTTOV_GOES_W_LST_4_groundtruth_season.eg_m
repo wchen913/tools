@@ -1,0 +1,127 @@
+
+ clear all; clc;
+% Extract GOES LST for Groundtruth locations
+%--- Head
+addpath('/data/srb1/wchen/tools/m_fx/','-end')
+   SatName = 'G10';  
+   yr    = 2004; yrstr=num2str(yr);
+   
+   vName = 'LST';
+   mon   = [1:12];
+   minstr= '30';
+   
+   optTime = 'yes'; 
+   svdata  = 'yes';%'no';%
+   %--- Geo infomation
+   nLat=501;
+   nLon=1101;
+   goesRes = 0.05;
+   goesLatNLim = 50;goesLatSLim = 25;
+   goesLonWLim = -125;goesLonELim = -70;
+   goesLat     = goesLatSLim:goesRes:goesLatNLim;
+   goesLon     = goesLonWLim:goesRes:goesLonELim;
+%    
+   stlon = [-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62];
+   stlat = [  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73];
+   stid  = {   'dra', 'bon', 'gwn',  'fpk',   'tbl', 'psu', 'sxf'};
+   nst   = length(stlat);
+%---
+    
+%--- 00, 15,45 min after hour
+   minute =15; mntStr=num2str(minute,'%02d');
+   
+%% --- Loop
+for ist =7
+	cont    = 0;
+    for imon  = mon
+        mmstr   = num2str(imon,'%02d');
+        dt      = eomday(yr,imon);
+         filePath = ['/data/srb2/wchen/LST/GOES_W/output/',yrstr,'_all/',yrstr,mmstr,'/'];
+          
+        for dyoi = 1:dt 
+            dd=num2str(dyoi,'%02d');
+            for hroi = 0:23
+                hh = num2str(hroi,'%02d');
+                
+                % **** input data ****
+				%2007_01_06_1530_skm.i.RTTOV_MERRA2_LUT
+                fileName = [filePath,yrstr,...
+                            '_',mmstr,'_',dd,'_',hh,minstr,'_skm.i.RTTOV_MERRA2_LUT'];  
+                disp(fileName)
+                %keyboard
+              if exist(fileName,'file')   
+                fid  	 = fopen(fileName,'r');
+                datain   = fread(fid,[nLon nLat],'float32');
+                fclose(fid);
+%                  if hroi==19 && (dyoi==1 || dyoi==31)
+%                      invar.sRET.lst = datain';
+%                      invar.sRET.lat = goesLat;
+%                      invar.sRET.lon = goesLon;
+% 
+%                      mfx_usmap_plot(dyoi,invar,[280 325])
+%                  keyboard
+%                  end
+                indlat = find(goesLat>=(stlat(ist)-goesRes/2.) & goesLat<=(stlat(ist)+goesRes/2.)); 
+                indlon = find(goesLon>=(stlon(ist)-goesRes/2.) & goesLon<=(stlon(ist)+goesRes/2.)); 
+              % disp(goesLat(indlat))
+              % disp(goesLon(indlon))
+                if ~isempty(indlat) && ~isempty(indlon)
+                    if length(indlat)==1 && length(indlon)==1
+                        yy = squeeze(datain(indlon,indlat));   
+                    end % if length(indlat)
+                    if length(indlat)>1 || length(indlon)>1 
+                        rad  = 4.0*atan(1.0)/180.0;
+                        wgty = cos(goesLat(indlat)*rad);
+                        wgty = repmat(wgty,[length(indlon),1]);
+                        wgtx = nan(length(indlon),length(indlat));
+                        wgtx(:,:)=1.0;
+                        wgt  = wgtx.*wgty;
+                        tmp  = datain(indlon,indlat);                      
+                        tmp  = wgt.*tmp;
+                        yy   = nanmean(tmp(:)); 
+                        clear tmp  wgt indlat indlon datain     
+                    end % if length(indlat)  
+                else    
+                    disp('---- can not find data around----');keyboard
+                end % if ~isempty 
+            %if hroi==18 
+            %   keyboard
+            %end 
+              else
+                   yy=NaN;
+             end % if exist(fileName)  
+             cont=cont+1;
+%              disp(yy);
+            if cont==1
+               data1 = yy;
+            else
+               data1 = [data1 yy];
+            end 
+            clear yy          
+            end %hori
+        end %dyoi
+    end %imon
+     
+        ndata1  = length(data1);   
+        data1   = reshape(data1,[24 ndata1/24]);  
+        disp([min(data1(:)),max(data1(:))])
+         if strcmpi(svdata,'yes')
+            datao  = data1;
+            datao(isnan(datao))=-999.0;
+            estfname=[num2str(yr),'_GOES_W_RTTOV_LST_SURFRAD_',upper(stid{ist}),'_Allday.dat'];
+            fid     = fopen(estfname,'w');
+            fwrite(fid,datao,'float32');
+            fclose(fid);
+            clear datao
+%             keyboard
+        end
+        
+      
+
+       
+
+ 
+end %ist 
+    disp(cont)
+%keyboard
+

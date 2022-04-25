@@ -1,0 +1,73 @@
+
+%----------------------------------------------------------------------
+function [pwtr,lat,lon,time] = obtain_ncepPwtr( fileName )
+%----------------------------------------------------------------------
+
+   %fileName = '/data/pkgroup2/xiaolei/SWATH/Pwater/pr_wtr.eatm.2005.nc';
+   ncid = netcdf.open(fileName,'NC_NOWRITE');
+
+   %%[ndims,nvars,natts,unlimdimID]= netcdf.inq(ncid);
+   %%glbattName=netcdf.inqAttName(ncid,netcdf.getConstant('NC_GLOBAL'),0);
+   %%glbatt=netcdf.getAtt(ncid,netcdf.getConstant('NC_GLOBAL'),glbattName);
+   %
+   %%[dimname, dim1] = netcdf.inqDim(ncid,0); %nLon=144
+   %%[dimname, dim2] = netcdf.inqDim(ncid,1); %nLat=73
+   %%[dimname, dim3] = netcdf.inqDim(ncid,2); %nTimes=1460
+
+   %-- get dimensions length
+   %
+   %dimID = netcdf.inqDimID(ncid,'lat');
+   %[dimname, nLat] = netcdf.inqDim(ncid,dimID);
+   %
+   %dimID = netcdf.inqDimID(ncid,'lon');
+   %[dimname, nLon] = netcdf.inqDim(ncid,dimID);
+   %
+   %dimID = netcdf.inqDimID(ncid,'time');
+   %[dimname, nTime] = netcdf.inqDim(ncid,dimID);
+   
+   
+   %-- get dimension values
+   %
+   varID = netcdf.inqVarID(ncid,'lat');
+   lat   = netcdf.getVar(ncid,varID);
+
+   varID = netcdf.inqVarID(ncid,'lon');
+   lon   = netcdf.getVar(ncid,varID);
+
+   varID = netcdf.inqVarID(ncid,'time');
+   time  = netcdf.getVar(ncid,varID);
+
+
+   %-- get pwater array
+   %
+   varID = netcdf.inqVarID(ncid,'pr_wtr'); %in (kg/m^2)
+   pwtr  = netcdf.getVar(ncid,varID);
+   
+   %offset = netcdf.getAtt(ncid,varID,'add_offset');
+   %sclfac = netcdf.getAtt(ncid,varID,'scale_factor');
+   misval = netcdf.getAtt(ncid,varID,'missing_value');
+   %units  = netcdf.getAtt(ncid,varID,'units')
+   
+   mis = pwtr==misval;
+   
+   %-- Matlab integer type CAN NOT be set to NaN! 
+   %   but pwtr==misval is OK, although misval is a int16 integer.
+   %   pay attention to the usage of the sclfac and offset.
+   %
+   %pwtr = single(pwtr);
+   pwtr(mis) =NaN;
+   %pwtr = sclfac*(pwtr-offset);
+   %pwtr = sclfac*pwtr+offset;
+
+   lat(  lat==misval) = NaN;
+   lon(  lon==misval) = NaN;
+   time(time==misval) = NaN;   
+
+   %-- close the netcdf file.
+   netcdf.close(ncid);
+
+%keyboard
+end
+
+
+

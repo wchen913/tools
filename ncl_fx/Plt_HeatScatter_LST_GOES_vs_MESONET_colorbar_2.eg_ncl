@@ -1,0 +1,236 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "./ScatterPlt.ncl" 
+ 
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+
+;++++ Head +++++
+    dynt     = "day";"night";"Allday"; 
+    nStd     = 3.;
+	wkstype     = "eps";"x11";"pdf";
+
+    vName    = "LST" 
+    Sat      = "GOES"  
+    keywrd   = "E";"--east";
+    version  = "UMD_RTTOV";"UMD_MORTRAN";
+ 
+    St       = "mesonet";
+    timeStep = "inst_hourly"
+	
+    bin_num  =100
+
+    UNDEF= -999.0
+    nhour= 24
+  ;++++++ Plot Parameters  ++++++
+    optCldMsk     = True ;False;
+    optOutlier    = True ;False;
+  
+    if .not.optOutlier then
+        nStd     = 0;
+    end if
+   
+
+    ;/data/srb3/wchen/Groundtruth/SKT/LST_GOES_E_UMD_4_mesonet_141st_ins_hour_2004_2009.nc    
+    ;SKT_mesonet_141st_inst_19990419_20071231.nc
+    ;pth	    = "/data/srb3/wchen/Groundtruth/SKT/"
+    pth	    = "./data/"
+	pltpth  = "./figs/"  
+    
+    monstr      = (/"JAN","FEB","MAR","APR","MAY","JUN",\
+                    "JUL","AUG","SEP","OCT","NOV","DEC"/)
+                    
+              
+;
+   
+;++++ Read Ground truth ++++ 
+     year     = "2004-2007"
+     NcVar    = "SKT_hr_"+str_lower(dynt)
+     facility = ""
+     grp      = "all";"partL";"partH";"single";
+          
+     file1    = "SKT_mesonet_141st_inst_19990419_20071231_dynt.nc"
+     lines  = asciiread("/data/srb3/wchen/Groundtruth/SKT/stinfo.txt",-1,"string")
+	 nline  = dimsizes(lines)
+	 tmp    = reshape(lines,(/3,nline/3/))
+	 stNames= tmp(0,:)
+	 StLat  = stringtofloat(tmp(1,:))
+	 StLon  = stringtofloat(tmp(2,:))
+	 print("Read Data") 
+	  
+	 f1	= addfile(pth+file1,"r") 
+	 print(f1)
+	 date   = f1->date
+     indts  = ind(date.eq.20040101)
+     indte  = ind(date.eq.20071231) 
+     yyyymmdd   = date(indts:indte)
+	 stdata = f1->$NcVar$(indts:indte,:,:)
+	 stdata = (/stdata+273./)
+	 stdata = where(stdata.gt.220, stdata,UNDEF)
+     printVarSummary(stdata)
+     printMinMax(stdata,True)
+     dimsz  = dimsizes(stdata)
+     ntime  = dimsz(0)
+     nSt    = dimsz(2)
+     ;temp   = f1->SKT
+     ;print(temp(:,:,:,140))
+     ;exit
+	 
+;++++ Read Estimate data ++++  
+     file2 = "LST_GOES_E_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"  
+     if optCldMsk then
+        file2 = file2+"_addCldMsk"
+        pth1  = pth
+     else
+        pth1 = pth+"/cldmsk_orig/"
+     end if ;if optCldMsk
+	 f2	= addfile(pth1+file2+".nc","r") 	 
+	 eastdata  = f2->lst(0:ntime-1,:,:)
+	 eastdata  = where(eastdata.gt.0,eastdata,UNDEF)
+	 eastdata@_FillValue   = UNDEF	
+	 printVarSummary(eastdata)
+	 printMinMax(eastdata,True)
+     
+     file3      = "LST_GOES_W_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009.nc"     
+	 f3	        = addfile(pth+"/cldmsk_orig/"+file3,"r") 	 
+	 westdata   = f3->lst(0:ntime-1,:,:)
+	 westdata   = where(westdata.gt.0,westdata,UNDEF)
+	 westdata@_FillValue   = UNDEF	
+	 printVarSummary(westdata)
+	 printMinMax(westdata,True)
+     
+     westdata = where(ismissing(eastdata),UNDEF,westdata)
+     eastdata = where(ismissing(westdata),UNDEF,eastdata)
+;++++ Data processing
+		if dynt.eq."day" then
+			dynt = "Daytime"
+		end if
+		if dynt.eq."night" then
+			dynt="Night-time"
+		end if
+		if dynt.eq."Allday" then
+		    dynt = "All-day"
+		end if 
+		wksname = vName+"_"+St+\
+               "_vs_"+Sat+"_"+version+"_"+dynt+"_Std"+nStd         
+     if grp.eq."single" then
+        ist      = 139;0;140; 76;
+        stName   = str_upper(stNames(ist))       
+        
+        x = ndtooned(stdata(:,:,ist))
+        y = ndtooned(eastdata(:,:,ist)) 
+        z = ndtooned(westdata(:,:,ist))
+        figId = St+"~C~"+stName+" ("+sprintf("%.2f",StLat(ist))+", "+sprintf("%.2f",StLon(ist))+")"+"~C~"+dynt 
+     else if grp.eq."all" then
+        stName   = str_upper(St)
+        mon      = 7;1;
+       
+        yyyy     = toint(yyyymmdd/10000)
+        mmdd     = toint(yyyymmdd)-toint(yyyy*10000)
+        mm       = toint(mmdd/100)
+        dd       = toint(mmdd)-toint(mm*100)         
+        indt     = ind(mm.eq.mon)
+        ;print(yyyy(365)+" "+mm(365)+" "+dd(365))
+        ;exit
+        wksname = wksname+"_mon"+sprinti("%0.2i",mon)
+        x = ndtooned(stdata(indt,:,:))
+        y = ndtooned(eastdata(indt,:,:))
+        z = ndtooned(westdata(indt,:,:))
+       ;figId = dynt+"~C~"+monstr(mon-1)+" "+year+"~C~"  
+        figId = "                 "+dynt+"/"+monstr(mon-1)+"~C~"
+        delete([/yyyy,mmdd,dd,indt/])		
+     else if grp.eq."partL" then
+        stName = str_upper(grp)
+        ist    = (/4,5,11,12,13,16,17,18,20,21,22,23,24,29,30,31,34,39,41,45,48,51,52,54,57,58,59,\
+        60,64,67,68,69,73,77,78,79,81,83,87,91,93,97,98,100,101,102,103,104,105,106,109,110,112,113,\
+        116,119,120,124,128,135,136,137,140,141/)
+        ist = (/ist-1/)
+          
+         x = ndtooned(stdata(:,:,ist))
+         y = ndtooned(eastdata(:,:,ist)) 
+         z = ndtooned(wetdata(:,:,ist)) 
+         figId = "PART of SITES ~C~"+"nst= "+dimsizes(ist)+"~C~"+dynt 
+    else if grp.eq."partH" then     
+         stName = str_upper(grp)
+          ist    = (/1,2,3,6,7,8,9,10,14,15,19,25,26,27,28,32,35,36,38,43,44,46,47,50,53,56,61,63,\
+          65,66,70,74,75,76,80,82,84,88,89,90,92,94,95,96,99,107,108,114,118,122,123,126,127,129,\
+          130,131,133/)
+         ist = (/ist-1/)
+               
+         x = ndtooned(stdata(:,:,ist))
+         y = ndtooned(eastdata(:,:,ist)) 
+         z = ndtooned(westdata(:,:,ist)) 
+         figId = "PART of SITES ~C~"+"nst= "+dimsizes(ist)+"~C~"+dynt
+     end if ;grp.eq."partH"     
+     end if ;grp.eq."partL" 
+     end if ;grp.eq."all" 
+     end if ;grp.eq."single"                 
+     
+     
+  
+;************************************************
+; plotting 
+;************************************************
+ istr=str_index_of_substr(wksname,"_",0)
+ wksname = str_insert(wksname,"_"+stName, istr(1))
+ ;print(wksname)	
+ 
+	print(isdefined("mon"))
+	    if isdefined("mon") then
+	     if mon.eq.1 then
+    	    xlim	= (/240,320,bin_num/);(/220,320/) 
+    	 end if;mon.eq.1
+    	 if mon.eq.7 then
+    	    xlim	= (/265,345,bin_num/)
+    	 end if;mon.eq.7
+    	else
+    	 xlim	=(/220,360,bin_num/)
+    	end if ;isdefined        
+         
+        xlabel = "Observed " +vName+" (K)"
+        ylabel = "Estimated "+vName+" (K)"
+        
+		wksname = wksname+"_Std"+nStd+"_nbin"+xlim(2)
+  
+        x@_FillValue =UNDEF
+        y@_FillValue =UNDEF
+        z@_FillValue =UNDEF
+     
+	print("...........Scatter Plotting.................")
+    wks   = gsn_open_wks (wkstype,pltpth+"heatscatter_"+wksname)
+    opt = True   
+    opt@style   = "heat"
+	opt@cmap    = "BlAqGrYeOrReVi200" 
+    plot = new ( 2, "graphic") 
+    tiStrs  = (/xlabel,ylabel,figId+"GOES_E.vs."+stName/) 
+    plot(0) = HeatScatterPlt(wks,x,y,xlim,nStd,optOutlier,tiStrs,opt)
+   
+   ;draw(plot(0))
+   ;frame(wks)
+    tiStrs  = (/xlabel,ylabel,figId+"GOES_W.vs."+stName/) 
+    plot(1) = HeatScatterPlt(wks,x,z,xlim,nStd,optOutlier,tiStrs,opt)
+    
+
+  ;draw(plot(1))
+  ;frame(wks)
+	resP                            = True
+   ;resP@gsnMaximize                = True
+   ;resP@gsnPanelYWhiteSpacePercent = 2
+    resP@gsnPanelXWhiteSpacePercent = 3
+    resP@gsnPanelLabelBar           = False
+    resP@lbOrientation              = "Vertical"
+    resP@lbLabelStride              = 2
+    resP@pmLabelBarWidthF      		= 0.85    
+    resP@lbBoxSeparatorLinesOn      = False
+       
+
+   
+     gsn_panel(wks,plot,(/1,2/),resP)
+     frame(wks)
+end

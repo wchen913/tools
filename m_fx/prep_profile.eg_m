@@ -1,0 +1,990 @@
+%----------------------------------------------------------------------
+function jumpin(timeV, satV, prepOutPath,saveSRC, gridRes)
+%----------------------------------------------------------------------
+
+   if gridRes == 1.0
+
+      prepare_profile_1deg( timeV, satV, prepOutPath,saveSRC )
+
+   elseif gridRes == 0.05
+
+      prepare_profile_5km( timeV, satV, prepOutPath,saveSRC )
+   
+   end
+   
+end
+
+
+%----------------------------------------------------------------------
+function prepare_profile_1deg( timeV, satV, prepOutPath,saveSRC )
+%----------------------------------------------------------------------
+
+   %-- To clear the **persistent** varialbes in the SUB functions.
+   %   This won't affect the upper level calling function workspace.
+   clear functions
+
+   %==========================================================================
+   %--- pth of Sat_dat MODIS Profile
+   %inPathProf = '/aosc/ceop/Data/Sat_Data/MODIS/'; %2002..2013
+   %inPathProf    = '/data/crash/wchen/MODIS/ShortWave/Input/Sat_Data/collection51/'; % from 2002-2014 contains symbol links
+   inPathProf    = '/data/srb8/wchen/LW/modis_hdf/';%2012-2019
+   %---pth of Pr_wtr
+   %inPathNCEPPwtr = '/aosc/ceop/ceop1/xiaolei/backup_hwang/srb7_hwang_Data/Data/'; %2003..2006
+   %inPathNCEPPwtr = '/data/pkgroup2/xiaolei/Level3/ncep/' %2002..2009
+   %inPathNCEPPwtr = '/aosc/ceop/Data/pwater/daily/'; %2010..2012
+   %inPathNCEPPwtr = '/data/crash/wchen/MODIS/ShortWave/Input/Pr_Wtr/daily/'; % from 2002-2014 contains symbol links
+	inPathNCEPPwtr = '/data/srb4/wchen/pwater/daily/'; %2013-2020
+   %---pth of elevDEM_high.dat
+   %inPathElev = '~/srb/dev2/fshare/Auxdata/elev/elevDEM_high.dat'; %for both 1deg and 5km
+   inPathElev = '/aosc/ceop/ytma/dev2/fshare/Auxdata/elev/elevDEM_high.dat'; % absolute pth for both 1deg and 5km
+
+   %---pth of solmu_elev.dat
+   inPathMu0 = './solmu_elev.dat'; %for 1deg
+   
+   %--- result of prepared profile
+   resultPath0 = [prepOutPath ,'profile/'];
+   %==========================================================================
+
+   paramC = {...
+              'O3Amnt' ,   'Total_Ozone_QA_Mean'; ...
+              'H2oAmnt',   'Atmospheric_Water_Vapor_QA_Mean'; ...
+              'SZA',       'Solar_Zenith_Mean';...
+            };       
+
+
+   %--- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+   for isat =1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+               
+%==========================================================================
+%{
+         if ismember(iyr,[2003:2005,2007])
+            %hdfPath = [inPathProf,'/','S',yyyy,'/',satName,'/cloud/'];%2005
+            hdfPath = [inPathProf,'/',yyyy,'/1_deg/'];
+         elseif ismember(iyr,[2006,2008:2013])
+            hdfPath = [inPathProf,'/',yyyy,'/'];
+         end
+%}
+            hdfPath = [inPathProf,'/',yyyy,'/'];
+%==========================================================================
+
+         nameList = dir([hdfPath,'/',satStr,'08_D3.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = '9999';%fileName(19:22);
+            %hrmin = str2num(hhmm);
+
+            %disp(sprintf('--- %s(): %04d/%02d/%02d-%s',mfilename,iyr,imon,idy,hhmm))
+            disp(['prep profile... ',fileName])
+         
+            %--- read the MODIS profile data
+            %
+            fullName = [hdfPath, fileName];
+            datC = cell( size(paramC,1), 1);
+            hdfID = hdfsd('start',fullName,'read');
+
+               odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+               for ip = 1:size(paramC,1)
+                  datC{ip} = obtain_hdf_datafield(...
+                           hdfID, paramC{ip,2}, 'doScl','doNaN');
+               end
+               cd(odir);
+
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+            uo3M = datC{ find( strcmp('O3Amnt' , paramC(:,1)) ) };
+            wtrM = datC{ find( strcmp('H2oAmnt', paramC(:,1)) ) };
+            szaM = datC{ find( strcmp('SZA',     paramC(:,1)) ) };
+            
+            elvM = NaN(size(wtrM));
+            prsM = NaN(size(wtrM));
+            
+            latM = repmat( [89.5:-1:-89.5], [size(wtrM,1),1] );
+            lonM = repmat( [-179.5:1:179.5]', [1,size(wtrM,2)] );
+
+            %---
+            uo3M = uo3M/1000; %to atm-cm
+      
+
+            %--- for some data, 5km version
+            %    there are lat,lon values =-999 but~=misval(-999.9).
+            %    there sza=32767 but not~=misval(32768)
+            %latM(latM<-90 ) = NaN;
+            %lonM(lonM<-180) = NaN;
+            %szaM(szaM<0   ) = NaN;
+            %%elvM(elvM<0)=NaN;
+
+
+            %--- fill the MODIS missing water content with the NCEP values
+            %    if still missing after filling, the SRB model will use
+            %    a global maverage climatology value.
+            %
+            [wtrM] = fill_water_content_1deg(...
+                                        iyr,imon,idy,doy,...
+                                        latM,lonM,wtrM,...
+                                        inPathNCEPPwtr);
+         
+            %--- fill the MODIS missing O3
+            %    if still missing after filling, the SRB model will
+            %    use a global average climatology value.
+            %
+            [uo3M] = fill_ozone_1deg( iyr,imon,idy,doy,...
+                                      latM,lonM,uo3M);
+
+
+            %--- fill the surface elevation and/or surface pressure.
+            % * "prs" can be missing. "elv" can be missing for scaling
+            %   surface pressure, BUT not for computing cloud thickness.
+            % * For scalling surface pressure:
+            %   if "elv" and "prs" are all missing:
+            %      The SRB model will use the standard atmosphere 
+            %      up from z=0 and P0=Ps(z=0), the standard surface pressure.
+            %   if "elv" is missing:
+            %      The SRB model will use the standard atmosphere 
+            %      up from z=0 and P0=Ps(z=0)*(prs/Ps(z=0))
+            %   if "prs" is missing
+            %      The SRB model will use the standard atmosphere
+            %      up from z=elv and P0=Ps(z=elv)*1.
+            %   if "elv" and "prs" are all exist:
+            %      The SRB model will use the standard atmosphere
+            %      up from z=elv and P0=Ps(z=elv)*(prs/Ps(z=elv))
+            %
+            %  elv  prs
+            %   0    0   (no cut, no scale)
+            %   0    1   (no cut,    scale)
+            %   1    0   (   cut, no scale)
+            %   1    1   (   cut     scale)
+            %
+            %   In order to take the surface elevation into effect,
+            %   'elv' and 'prs' can not be both missing, at least
+            %   one of them has to be precent!
+            % 
+            % * need to tell the SRB model the missing value 
+            %   used in the input data!
+            %
+            [elvM] = fill_surface_elevation_1deg( latM,lonM,elvM,...
+                                                  inPathElev );
+
+
+            %--- fill the MODIS missing surface pressure
+            %
+            %cif (prs<0.) then
+            %c   if (elv>0) then
+            %c      prs = 1013.25*exp(-(elv/7000.)) !elv in meters
+            %c   else
+            %c      prs = 1013.25
+            %c   endif
+            %cendif
+
+            
+            %--- mu0
+            mu0M = cos( szaM*pi/180 );
+            [mu0M] = fill_mu0_1deg( iyr,imon,idy,doy,...
+                                    latM,lonM,mu0M, inPathMu0);
+
+%keyboard
+%return            
+            %--- output prepared cloud data
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'pfl.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(wtrM), 'int32');
+               fwrite(fid, size(wtrM),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, mu0M, 'float32');
+               fwrite(fid, wtrM, 'float32');
+               fwrite(fid, uo3M, 'float32');
+               fwrite(fid, elvM, 'float32');
+               fwrite(fid, prsM, 'float32');
+            fclose(fid);
+
+
+            
+         end %--for ifl = 1:numFiles
+               
+      end %--for atv=TimeV
+
+   end %--for isat=1:length(satV)
+
+
+end
+
+
+
+%----------------------------------------------------------------------
+function  [wtrM] = fill_water_content_1deg( year,month,day,doy,...
+                                            latM,lonM,wtrM,...
+                                            inPathNCEPPwtr)         
+%----------------------------------------------------------------------
+%
+%netcdf pr_wtr.eatm.2005 {
+%dimensions:
+%        lon = 144 ;
+%        lat = 73 ;
+%        time = UNLIMITED ; // (365 currently)
+%variables:
+%        float lat(lat) ;
+%                lat:units = "degrees_north" ;
+%                lat:actual_range = 90.f, -90.f ;
+%                lat:long_name = "Latitude" ;
+%        float lon(lon) ;
+%                lon:units = "degrees_east" ;
+%                lon:long_name = "Longitude" ;
+%                lon:actual_range = 0.f, 357.5f ;
+%        double time(time) ;
+%                time:units = "hours since 1-1-1 00:00:0.0" ;
+%                time:long_name = "Time" ;
+%                time:actual_range = 17566752., 17575488. ;
+%                time:delta_t = "0000-00-01 00:00:00" ;
+%                time:avg_period = "0000-00-01 00:00:00" ;
+%        short pr_wtr(time, lat, lon) ;
+%                pr_wtr:long_name = "mean Daily Precipitable Water for entire atmosphere" ;
+%                pr_wtr:valid_range = -50.f, 150.f ;
+%                pr_wtr:actual_range = -6.4f, 84.35001f ;
+%                pr_wtr:units = "kg/m^2" ;
+%                pr_wtr:add_offset = 277.65f ;
+%                pr_wtr:scale_factor = 0.01f ;
+%                pr_wtr:missing_value = 32766s ;
+%                pr_wtr:precision = 2s ;
+%                pr_wtr:least_significant_digit = -1s ;
+%                pr_wtr:GRIB_id = 54s ;
+%                pr_wtr:GRIB_name = "PWAT" ;
+%                pr_wtr:var_desc = "Precipitable Water Content\n",
+%                        "I" ;
+%                pr_wtr:dataset = "NCEP Reanalysis Daily Averages" ;
+%                pr_wtr:level_desc = "Entire Atmosphere Considered As a Single Layer\n",
+%                        "AB" ;
+%                pr_wtr:statistic = "Mean\n",
+%                        "M" ;
+%                pr_wtr:parent_stat = "Individual Obs\n",
+%                        "I" ;
+%
+
+   persistent crntYear
+   persistent ncepWtr ncepLat ncepLon ncepTime
+
+%year=2005
+%inPathNCEPPwtr = '/aosc/ceop/ceop1/xiaolei/backup_hwang/srb7_hwang_Data/Data/';
+   
+   ncepPwtrPath = inPathNCEPPwtr;
+
+
+   TPD=1; %NCEP daily data
+   ncepLon1 = 1.25; %0..360
+   ncepLat1 = 88.75; %90..-90
+   ncepDLon = 2.5;
+   ncepDLat = 2.5;
+   ncepNLon = 360/ncepDLon;   %=144
+   ncepNLat = 180/ncepDLat+1; %=73
+
+
+   if isempty(crntYear) || year~=crntYear
+
+      yyyy = num2str(year, '%4.4d');
+      ncepPwtrFile = [ncepPwtrPath,'pr_wtr.eatm.',yyyy,'.nc'];
+
+      %odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      [ncepWtr,ncepLat,ncepLon,ncepTime] =...
+                              obtain_ncepPwtr( ncepPwtrFile ); %NCEP water content in kg/m^2
+      %cd(odir);
+
+      crntYear = year;
+   end %if isempty(crntYear) || year~=crntYear)
+
+   
+   %-- take out the ncep water content for the time
+   %
+   %gmt = fix(hrmin/100) + mod(hrmin,100)/60;
+   %tIdx = (datenum(year,month,day)-datenum(year,1,1)) * TPD +...
+   %       round( gmt/24*TPD) + 1;
+   %ncWtr = ncepWtr(:,:,tIdx);
+   tIdx = (datenum(year,month,day)-datenum(year,1,1)) * TPD + 1;
+   ncWtr = ncepWtr(:,:,tIdx);
+
+
+   %-- get the lat and lon for the missing pixels
+   %
+   mdsDim = size(wtrM);
+   wtrM = reshape(wtrM, [],1);
+   latM = reshape(latM, [],1);
+   lonM = reshape(lonM, [],1);
+   
+   mdsmis = isnan(wtrM) & ~isnan(latM) & ~isnan(lonM);
+   mislat = latM(mdsmis);
+   mislon = lonM(mdsmis);
+   mislon(mislon<0) = mislon(mislon<0)+360; %lon=0..360
+
+   
+   %-- determine the locations of missing pixel in the NCEP map.
+   %
+   iLon = round( (mislon-ncepLon1)./ncepDLon + 1 );
+   iLat = round( (ncepLat1-mislat)./ncepDLat + 1 );
+   iLon(iLon>ncepNLon) = mod( iLon(iLon>ncepNLon),ncepNLon );
+   ncpmis = sub2ind( [ncepNLon,ncepNLat],iLon,iLat );
+
+
+   %-- replace the MODIS missings with the NCEP values.
+   %
+   wtrM(mdsmis) = ncWtr(ncpmis)/10; %kg/m2 --> cm
+   wtrM = reshape(wtrM, mdsDim);
+
+   
+   %-- still missing or invalid value, filled with zonal average.
+   %
+   wtrM(wtrM<0) = NaN;
+   ms = isnan(wtrM);
+   if any(ms(:))
+      %wtrM(isnan(wtrM)) = nanmean(nanmean(wtrM));
+      zM = repmat( nanmean(wtrM),[size(wtrM,1),1] );
+      wtrM(ms)=zM(ms); %filled with zonal mean
+   end
+
+
+   %-- if still missing, the SRB model will use the climatology value.
+   wtrM(wtrM<0)=NaN;
+   
+%keyboard
+end
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function  [uo3M] = fill_ozone_1deg( year,month,day,doy,...
+                                    latM,lonM,uo3M)         
+%----------------------------------------------------------------------
+
+   %-- fill with zonal mean
+   uo3M(uo3M<0) = NaN;
+   ms = isnan(uo3M);
+   if any(ms(:))
+      %uo3M( isnan(uo3M) ) = nanmean(nanmean(uo3M));
+      zM = repmat( nanmean(uo3M),[size(uo3M,1),1] );
+      uo3M(ms)=zM(ms); %filled with zonal mean
+   end
+
+   
+   %-- if still missing, the SRB model will use the climatology value.
+   uo3M(uo3M<0)=NaN;
+   
+%keyboard
+end
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function  [elvM] = fill_surface_elevation_1deg( latM,lonM,elvM,...
+                                                inPathElev )
+%----------------------------------------------------------------------
+
+   persistent first
+   persistent dem %in units of (m)
+
+   origDemRes  = 5/60; %=5 minutes resolution, in degree.
+   origDemNLat = 180/origDemRes; %=2160; 90..-90
+   origDemNLon = 360/origDemRes; %=4320; -180..180
+   origDemLat1 = 90-origDemRes/2;
+   origDemLon1 = -180+origDemRes/2;
+
+   demRes  = 1.0; % 1.0 degree resolution.
+   demNLat = 180/demRes; %=180; 90..-90
+   demNLon = 360/demRes; %=360; -180..180
+   demLat1 = 90-demRes/2;
+   demLon1 = -180+demRes/2;
+
+   demFile = inPathElev;
+
+   if isempty(first)
+      
+      fid = fopen(demFile,'r');
+         origDem = fread(fid,(origDemNLon+4)*origDemNLat,'int16'); %fortran sequential binary format.
+      fclose(fid);
+      origDem = reshape(origDem, (origDemNLon+4), origDemNLat);
+      origDem = origDem(3:end-2,:); %[nLons,nLats]; lon=-180..180, lat=90..-90
+
+      %-- assume all NaN in dem are ocean type, so set NaN=0.
+      %dem(dem<-900)=NaN;
+      origDem(origDem<-900)=0.; % the DEM should not have any Nan now. in (m)
+
+      %-- average to 1.0 degree
+      %   boxLen must be integer!
+      boxLen = demRes/origDemRes; %=12; 
+      if boxLen ~=1
+         z = reshape(origDem, [boxLen,origDemNLon/boxLen,boxLen,origDemNLat/boxLen]);
+         z = permute(z,[1,3,2,4]);
+         z = reshape(z,[boxLen*boxLen, origDemNLon/boxLen, origDemNLat/boxLen]);
+         z = squeeze(nanmean(z,1));
+         dem = z;
+      else
+         dem = origDem;
+      end
+      
+      first = -1;
+   end
+   
+
+   %-- get the lat and lon for the missing pixels
+   %
+   mdsDim = size(elvM);
+   elvM = reshape(elvM, [],1);
+   latM = reshape(latM, [],1);
+   lonM = reshape(lonM, [],1);
+
+   elvM(elvM<0)=NaN; %set elv<0 to dem value.
+
+   mdsmis = isnan(elvM) & ~isnan(latM) & ~isnan(lonM); %latM or lonM may have NaN values too.
+   mislat = latM(mdsmis);
+   mislon = lonM(mdsmis);
+   mislon(mislon>180) = mislon(mislon>180)-360; %lon=-180..180
+
+   
+   %-- determine the locations of missing pixel in the DEM map.
+   %
+   iLon = round( (mislon-demLon1)./demRes + 1 );
+   iLat = round( (demLat1-mislat)./demRes + 1 );
+   iLon(iLon>demNLon) = mod( iLon(iLon>demNLon),demNLon );
+   iLat(iLat>demNLat) = demNLat;
+   demmis = sub2ind( [demNLon,demNLat],iLon,iLat );
+
+
+   %-- replace the MODIS missings with the DEM values.
+   %
+   elvM(mdsmis) = dem(demmis);
+   elvM = reshape(elvM, mdsDim);
+
+
+   %-- still missing or invalid value, filled with average.
+   %
+   %elvM(elvM<0) = NaN;
+   %elvM(isnan(elvM)) = nanmean(nanmean(elvM));
+
+%keyboard
+end
+
+
+%----------------------------------------------------------------------
+function  [mu0M] = fill_mu0_1deg( year,month,day,doy, latM,lonM,mu0M,...
+                                  inPathMu0 );
+%----------------------------------------------------------------------
+
+%{
+% 130201: Hengmao and Xiaolei used daily mean mu0 to 
+% calculated the 1-deg flux. MOD08_D3 has solar zenith included. 
+% So use the MOD08_D3 instantaneous solar zenith value.
+   
+   %--- Simply fill the missing mu0 with zonal mean values.
+   %
+   zMu0 = nanmean(mu0M); %[1,180]
+
+   nLat = size(mu0M,2);
+   nLon = size(mu0M,1);
+   zM = repmat(zMu0,[nLon,1]); %[360,180]
+   
+   mu0M(isnan(mu0M)) = zM(isnan(mu0M));
+   mu0M(mu0M<0) = 0;
+
+%keyboard %130201
+return %130201
+%}
+
+   persistent first
+   persistent pmu0 dayLen %preCalcMu0 and day length
+
+   pmu0Res  = 1; %in degree.
+   pmu0NLat = 180; % 90..-90
+   pmu0Lat1 = 90-pmu0Res/2;
+
+   pmu0File = inPathMu0; 
+
+
+   if isempty(first)
+      
+      fid = fopen(pmu0File,'r');
+         dM = fread(fid, pmu0NLat*365*2,'float32');
+      fclose(fid);
+      dM = reshape(dM, [pmu0NLat,365,2]);
+
+      pmu0   = dM(:,:,1); %[nLats,365]; lat=90..-90
+      dayLen = dM(:,:,2); %day length.
+   
+      first = -1;
+   end
+
+
+   %--- construct a matrix of size mu0M
+   it = (datenum(year,month,day)-datenum(year,1,1)) + 1;
+   it = mod(it-1,365)+1;
+   pmM = repmat( pmu0(:,it)', [size(mu0M,1),1]); %[nLons,nLats]; 90..-90,-180..180.
+   pmu0Lon1 = -179.5; %dummy paramter
+   pmu0NLon = 360;    %dummy paramter
+
+mu0M = pmM; 
+return
+%}
+
+%{
+   odir=cd('~/srb/dev2/mshare/');
+      [iMu0] = solarMu(year, month, day, 10.5, latM, lonM);
+      [dMu0,dLen] = dailyMu0(latM, 1);
+   cd(odir);
+%}
+
+%{
+   %-- get the lat and lon for the missing pixels
+   %
+   mdsDim = size(mu0M);
+   mu0M = reshape(mu0M, [],1);
+   latM = reshape(latM, [],1);
+   lonM = reshape(lonM, [],1);
+
+   mu0M(mu0M<0)=NaN; %set elv<0 to pmu0 value.
+
+   mdsmis = isnan(mu0M) & ~isnan(latM)  & ~isnan(lonM); %latM or lonM may have NaN values too.
+   mislat = latM(mdsmis);
+   mislon = lonM(mdsmis);
+   mislon(mislon>180) = mislon(mislon>180)-360; %lon=-180..180
+
+   
+   %-- determine the locations of missing pixel in the pmu0 map.
+   %
+   iLon = round( (mislon-pmu0Lon1)./pmu0Res + 1 );
+   iLat = round( (pmu0Lat1-mislat)./pmu0Res + 1 );
+   iLon(iLon>pmu0NLon) = mod( iLon(iLon>pmu0NLon),pmu0NLon );
+   iLat(iLat>pmu0NLat) = pmu0NLat;
+   pmmis = sub2ind( [pmu0NLon,pmu0NLat],iLon,iLat );
+
+
+   %-- replace the MODIS missings with the pmu0 values.
+   %
+   mu0M(mdsmis) = pmM(pmmis);
+   mu0M = reshape(mu0M, mdsDim);
+
+
+   %-- still missing or invalid value, filled with average.
+   %
+   %mu0M(mu0M<0) = NaN;
+   %mu0M(isnan(mu0M)) = nanmean(nanmean(mu0M));
+%}
+
+%keyboard
+end
+
+
+
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function prepare_profile_5km( timeV, satV, prepOutPath, saveSRC )
+%----------------------------------------------------------------------
+
+   %-- To clear the **persistent** varialbes in the SUB functions.
+   %   This won't affect the upper level calling function workspace.
+   clear functions
+
+   %yrV  = [2005];
+   %monV = [1,2];
+   %dayV = [];
+   %satV = {'terra','aqua'}; 
+   
+   %inPathProf = '/data/pkgroup1/xiaolei/WUSA/'; %2005
+   inPathProf = '/aosc/ceop/Data/Sat_Data/MODIS/Western_USA/'; %..2010
+   inPathNCEPPwtr = '/data/pkgroup2/xiaolei/SWATH/Pwater/'; %upto 2009
+   inPathElev = '~/srb/dev2/fshare/Auxdata/elev/elevDEM_high.dat';
+
+   resultPath0 = [prepOutPath ,'profile/'];
+
+
+
+   %-- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+   for isat = 1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+               
+         if iyr==2005
+            hdfPath = [inPathProf,'/','S',yyyy,'/',satName,'/profile/'];%2005
+         else
+            hdfPath = [inPathProf,'/',yyyy,'/']; %2009,2010
+         end
+         nameList = dir([hdfPath,'/',satStr,'07_L2.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = fileName(19:22);
+            hrmin = str2num(hhmm);
+
+%test
+%if doy~=366 || hrmin~=2150 continue; end
+
+            disp(fileName)
+            
+            %-- read the MODIS profile data
+            %
+            fullName = [hdfPath, fileName];
+            hdfID = hdfsd('start',fullName,'read');
+               latM = obtain_hdf_datafield(hdfID, 'Latitude','doScl','doNaN'); % (deg,-90..90)
+               lonM = obtain_hdf_datafield(hdfID, 'Longitude','doScl','doNaN');% (deg,-180..180)
+               szaM = obtain_hdf_datafield(hdfID, 'Solar_Zenith','doScl','doNaN');% (deg)
+               wtrM = obtain_hdf_datafield(hdfID, 'Water_Vapor','doScl','doNaN'); % (cm)
+               uo3M = obtain_hdf_datafield(hdfID, 'Total_Ozone','doScl','doNaN'); % (Dobson)
+               elvM = obtain_hdf_datafield(hdfID, 'Surface_Elevation','doScl','doNaN');% (m)
+               prsM = obtain_hdf_datafield(hdfID, 'Surface_Pressure','doScl','doNaN'); % (hPa)
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+      
+            %-- for some data, 
+            %   there are lat,lon values =-999 but~=misval(-999.9).
+            %   there sza=32767 but not~=misval(32768)
+            latM(latM<-90 ) = NaN;
+            lonM(lonM<-180) = NaN;
+            szaM(szaM<0   ) = NaN;
+            %elvM(elvM<0)=NaN;
+
+            %-- fill the MODIS missing water content with the NCEP values
+            %   if still missing after filling, the SRB model will use
+            %   a global maverage climatology value.
+            %
+            [wtrM] = fill_water_content_5km(...
+                                         iyr,imon,idy,hrmin,doy,...
+                                         latM,lonM,wtrM,...
+                                         inPathNCEPPwtr);
+         
+            %-- fill the MODIS missing O3
+            %   if still missing after filling, the SRB model will
+            %   use a global average climatology value.
+            %
+            [uo3M] = fill_ozone_5km( iyr,imon,idy,hrmin,doy,...
+                                     latM,lonM,uo3M);
+            
+
+            %-- fill the surface elevation and/or surface pressure.
+            % * "prs" can be missing. "elv" can be missing for scaling
+            %   surface pressure, BUT not for computing cloud thickness.
+            % * For scalling surface pressure:
+            %   if "elv" and "prs" are all missing:
+            %      The SRB model will use the standard atmosphere 
+            %      up from z=0 and P0=Ps(z=0), the standard surface pressure.
+            %   if "elv" is missing:
+            %      The SRB model will use the standard atmosphere 
+            %      up from z=0 and P0=Ps(z=0)*(prs/Ps(z=0))
+            %   if "prs" is missing
+            %      The SRB model will use the standard atmosphere
+            %      up from z=elv and P0=Ps(z=elv)*1.
+            %   if "elv" and "prs" are all exist:
+            %      The SRB model will use the standard atmosphere
+            %      up from z=elv and P0=Ps(z=elv)*(prs/Ps(z=elv))
+            %
+            %  elv  prs
+            %   0    0   (no cut, no scale)
+            %   0    1   (no cut,    scale)
+            %   1    0   (   cut, no scale)
+            %   1    1   (   cut     scale)
+            %
+            %   In order to take the surface elevation into effect,
+            %   'elv' and 'prs' can not be both missing, at least
+            %   one of them has to be precent!
+            % 
+            % * need to tell the SRB model the missing value 
+            %   used in the input data!
+            %
+            [elvM] = fill_surface_elevation_5km(...
+                     latM,lonM,elvM, inPathElev );
+
+
+            %-- fill the MODIS missing surface pressure
+            %
+            %cif (prs<0.) then
+            %c   if (elv>0) then
+            %c      prs = 1013.25*exp(-(elv/7000.)) !elv in meters
+            %c   else
+            %c      prs = 1013.25
+            %c   endif
+            %cendif
+
+            
+            %-- sza to mu0
+            mu0 = cos( szaM*pi/180 );
+
+%keyboard
+%return            
+            %-- output prepared cloud data
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'pfl.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(wtrM), 'int32');
+               fwrite(fid, size(wtrM),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, mu0,  'float32');
+               fwrite(fid, wtrM, 'float32');
+               fwrite(fid, uo3M, 'float32');
+               fwrite(fid, elvM, 'float32');
+               fwrite(fid, prsM, 'float32');
+            fclose(fid);
+
+         end %--for ifl = 1:numFiles
+                     
+      end %--for atv = timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+%----------------------------------------------------------------------
+function  [wtrM] = fill_water_content_5km( year,month,day,hrmin,doy,...
+                                           latM,lonM,wtrM,...
+                                           inPathNCEPPwtr)         
+%----------------------------------------------------------------------
+
+   persistent crntYear
+   persistent ncepWtr ncepLat ncepLon ncepTime
+   
+   ncepPwtrPath = inPathNCEPPwtr;
+
+   TPD=4; %NCEP data are 4 times a day at 00,06,12,18
+   ncepLon1 = 1.25; %0..360
+   ncepLat1 = 88.75; %90..-90
+   ncepDLon = 2.5;
+   ncepDLat = 2.5;
+   ncepNLon = 360/ncepDLon;   %=144
+   ncepNLat = 180/ncepDLat+1; %=73
+
+
+   if isempty(crntYear) || year~=crntYear
+
+      yyyy = num2str(year, '%4.4d');
+      ncepPwtrFile = [ncepPwtrPath,'pr_wtr.eatm.',yyyy,'.nc'];
+      [ncepWtr,ncepLat,ncepLon,ncepTime] =...
+                              obtain_ncepPwtr( ncepPwtrFile ); %NCEP water content in kg/m^2
+
+      crntYear = year;
+   end %if isempty(crntYear) || year~=crntYear)
+
+   
+   %-- take out the ncep water content for the time
+   %
+   gmt = fix(hrmin/100) + mod(hrmin,100)/60;
+   %121107: Mayingtao, modified the way to compute the "tIdx"
+   %tIdx = (datenum(year,month,day)-datenum(year,1,1)) * TPD +...
+   %       round( gmt/24*TPD) + 1;
+   tIdx = (datenum(year,month,day)-datenum(year,1,1)) * TPD +...
+          ceil(gmt/24*TPD);
+   ncWtr = ncepWtr(:,:,tIdx);
+
+
+   %-- get the lat and lon for the missing pixels
+   %
+   mdsDim = size(wtrM);
+   wtrM = reshape(wtrM, [],1);
+   latM = reshape(latM, [],1);
+   lonM = reshape(lonM, [],1);
+   
+   mdsmis = isnan(wtrM) & ~isnan(latM) & ~isnan(lonM);
+   mislat = latM(mdsmis);
+   mislon = lonM(mdsmis);
+   mislon(mislon<0) = mislon(mislon<0)+360; %lon=0..360
+
+   
+   %-- determine the locations of missing pixel in the NCEP map.
+   %
+   iLon = round( (mislon-ncepLon1)./ncepDLon + 1 );
+   iLat = round( (ncepLat1-mislat)./ncepDLat + 1 );
+   iLon(iLon>ncepNLon) = mod( iLon(iLon>ncepNLon),ncepNLon );
+   ncpmis = sub2ind( [ncepNLon,ncepNLat],iLon,iLat );
+
+
+   %-- replace the MODIS missings with the NCEP values.
+   %
+   wtrM(mdsmis) = ncWtr(ncpmis)/10; %kg/m2 --> cm
+   wtrM = reshape(wtrM, mdsDim);
+
+   
+   %-- still missing or invalid value, filled with average.
+   %
+   wtrM(wtrM<0) = NaN;
+   wtrM(isnan(wtrM)) = nanmean(nanmean(wtrM));
+
+
+   %-- if still missing, the SRB model will use the climatology value.
+   wtrM(wtrM<0)=NaN;
+   
+%keyboard
+end
+
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function  [uo3M] = fill_ozone_5km( year,month,day,hrmin,doy,...
+                                   latM,lonM,uo3M)         
+%----------------------------------------------------------------------
+
+   uo3M = uo3M/1000; %to atm-cm
+
+   %-- at present, simply use the region average to fill the missings.
+   uo3M(uo3M<0) = NaN;
+   uo3M( isnan(uo3M) ) = nanmean(nanmean(uo3M));
+   
+   %-- if still missing, the SRB model will use the climatology value.
+   uo3M(uo3M<0)=NaN;
+   
+end
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function  [elvM] = fill_surface_elevation_5km( latM,lonM,elvM,inPathElev )
+%----------------------------------------------------------------------
+
+   persistent first
+   persistent dem %in units of (m)
+
+
+   demRes=5/60; %=5 minutes resolution, in degree.
+   demNLat=180/demRes; %=2160; 90..-90
+   demNLon=360/demRes; %=4320; -180..180
+   demLat1=90-demRes/2;
+   demLon1=-180+demRes/2;
+
+   
+   demFile = inPathElev;
+
+   if isempty(first)
+      
+      fid = fopen(demFile,'r');
+         dem = fread(fid,(demNLon+4)*demNLat,'int16'); %fortran sequential binary format.
+      fclose(fid);
+      dem = reshape(dem, (demNLon+4), demNLat);
+      dem = dem(3:end-2,:); %[nLons,nLats]; lon=-180..180, lat=90..-90
+
+      %-- assume all NaN in dem are ocean type, so set NaN=0.
+      %dem(dem<-900)=NaN;
+      dem(dem<-900)=0.; % the DEM should not have any Nan now.
+   
+      first = -1;
+   end
+   
+
+   %-- get the lat and lon for the missing pixels
+   %
+   mdsDim = size(elvM);
+   elvM = reshape(elvM, [],1);
+   latM = reshape(latM, [],1);
+   lonM = reshape(lonM, [],1);
+
+   elvM(elvM<0)=NaN; %set elv<0 to dem value.
+
+   mdsmis = isnan(elvM) & ~isnan(latM) & ~isnan(lonM); %latM or lonM may have NaN values too.
+   mislat = latM(mdsmis);
+   mislon = lonM(mdsmis);
+   mislon(mislon>180) = mislon(mislon>180)-360; %lon=-180..180
+
+   
+   %-- determine the locations of missing pixel in the DEM map.
+   %
+   iLon = round( (mislon-demLon1)./demRes + 1 );
+   iLat = round( (demLat1-mislat)./demRes + 1 );
+   iLon(iLon>demNLon) = mod( iLon(iLon>demNLon),demNLon );
+   iLat(iLat>demNLat) = demNLat;
+   demmis = sub2ind( [demNLon,demNLat],iLon,iLat );
+
+
+   %-- replace the MODIS missings with the DEM values.
+   %
+   elvM(mdsmis) = dem(demmis);
+   elvM = reshape(elvM, mdsDim);
+
+
+   %-- still missing or invalid value, filled with average.
+   %
+   %elvM(elvM<0) = NaN;
+   elvM(isnan(elvM)) = nanmean(nanmean(elvM));
+
+%keyboard
+end
+
+
+

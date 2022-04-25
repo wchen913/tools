@@ -1,0 +1,63 @@
+
+
+%----------------------------------------------------------------------
+function  [sfc, sfcTypRes, sfcTypLat1, sfcTypLon1] =...
+          read_surface_type_5km( inPathSfcTyp )
+%----------------------------------------------------------------------
+
+   smpStp = 3; %0.05deg
+   smp1   = round(smpStp/2);
+   
+   origRes = 1/60;
+   sfcTypRes = origRes*smpStp; %original res.=1minute, in degree.
+   sfcTypLat1 = 90-origRes/2-(smp1-1)*origRes; %90-alb16Res/2;
+   sfcTypLon1 = -180+origRes/2+(smp1-1)*origRes; %-180+alb16Res/2;
+   
+
+   %--  IGBP_Land_Cover_Type (720, 4)
+   %    8-bit integer,    10800 x 21600
+   %    Number of attributes = 22
+   %        long_name = IGBP Land Cover Classification Type
+   %        units = class number
+   %        valid_range = 0,-2
+   %        _FillValue = -1
+   %        0  water = 0
+   %        1  evergreen needleleaf forest = 1
+   %        2  evergreen broadleaf forest = 2
+   %        3  deciduous needleleaf forest = 3
+   %        4  deciduous broadleaf forest = 4
+   %        5  mixed forests = 5
+   %        6  closed shrubland = 6
+   %        7  open shrublands = 7
+   %        8  woody savannas = 8
+   %        9  savannas = 9
+   %        10 grasslands = 10
+   %        11 permanent wetlands = 11
+   %        12 croplands = 12
+   %        13 urban and built-up = 13
+   %        14 cropland/natural vegetation mosaic = 14
+   %        15 snow and ice = 15
+   %        16 barren or sparsely vegetated = 16
+   %        17 unclassified = -2
+   %
+   sfcTypPath0 = inPathSfcTyp;
+   sfcTypFileName = ['IGBP.EcoMap.v1.0.2004.129.v004.hdf'];
+   fullName = [sfcTypPath0,sfcTypFileName];
+
+   hdfID = hdfsd('start',fullName,'read');
+      odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      lat = obtain_hdf_datafield(hdfID, 'Latitude', 'doScl','doNaN');
+      lon = obtain_hdf_datafield(hdfID, 'Longitude', 'doScl','doNaN');
+      sfc = obtain_hdf_datafield(hdfID, 'IGBP_Land_Cover_Type', '',''); %int8
+      cd(odir);
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+   %-- downsacaling
+   lat = lat(smp1:smpStp:end);
+   lon = lon(smp1:smpStp:end);
+   sfc = sfc(smp1:smpStp:end, smp1:smpStp:end); %int8 type
+
+
+%keyboard
+end
+

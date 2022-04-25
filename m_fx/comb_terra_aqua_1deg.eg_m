@@ -1,0 +1,173 @@
+% 130205: modified from plot_1deg.m to combine terra and aqua to get
+%         daily and monthly mean.
+% 120427: Mayingtao; new modid processing with snow consideration
+%
+% read MODIS (5-km) swath outputs
+% The file name is designated by the start time of 5-minutes swath. 
+% The file is in binary format. 
+% The geo-location information and flux for every pixel within a 5-minutes swath 
+% are stored in the order of latitude (270*406), longitude (270*406) 
+% and radiative flux (270*406). 
+% Usually, the output grid size is 270*406 pixels. 
+% However, there are swaths that are of 270*408 pixels or 270*410 pixels.
+% Those cases are denoted by the additional suffix "_408" or "_410" to
+% the file names. 
+
+
+%---------------------------------------------------------------------
+function daily_monthly_mean()   
+%---------------------------------------------------------------------
+
+   %--- for 2010; 140210
+   resultDataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results/'];
+   resultPathSfx='';
+   mu0DataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/input/'];
+   mu0PathSfx='';
+   avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results_avg/'];
+   avgPathSfx='';
+
+   %--- for 2011,2012; meanMu0+1367S0; Indian ocean
+   %resultDataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results/'];
+   %resultPathSfx='';
+   %mu0DataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/input/'];
+   %mu0PathSfx='';
+   %avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results_avg/'];
+   %avgPathSfx='';
+   %%avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/test/'];
+   %%avgPathSfx='';
+
+   %--- for 2011; meanMu0+1367S0, Portugal
+   %resultDataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg_odir/results/'];
+   %resultPathSfx='';
+   %mu0DataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg_odir/input/'];
+   %mu0PathSfx='';
+   %avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg_odir/results_avg/'];
+   %avgPathSfx='';
+
+   %--- v3, instmu0+1367S0
+   %resultDataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results/'];
+   %resultPathSfx='_insmu0';
+   %mu0DataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/input/'];
+   %mu0PathSfx='_insmu0';
+   %avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results_avg/'];
+   %avgPathSfx='_insmu0';
+
+   %--- insmu0+1355S0+stn
+   %resultDataPath=[...
+   %   '/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results_stn/'];
+   %resultPathSfx='';
+   %mu0DataPath=['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/input/'];
+   %mu0PathSfx='_insmu0';
+   %avgDataPath = ['/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/results_avg/'];
+   %avgPathSfx='';
+   
+
+   %year = [2011,2012];
+   %misYrMon = [201212];
+   year = [2010];
+   misYrMon = [-9999];
+   
+   param = 'ssda';
+
+   MISS = -9999.;
+
+   for iyr = year
+   for imm = 1:12
+      
+      yrmon = iyr*100+imm;
+      if ismember(yrmon, misYrMon); continue;  end
+      
+      yyyy = num2str(iyr,'%04d');
+      mm = num2str(imm,'%02d');
+
+      dt = eomday(iyr,imm);
+      t1 = datenum(iyr,imm,1)-datenum(iyr,1,0);
+      doi = [t1:t1+dt-1];
+
+      disp(sprintf('%s, %0d/%0d, %0d..%0d',...
+                   param, iyr,imm,doi(1),doi(end)))
+      
+
+      %--- get terra and aqua results.
+      %wusa.day  = day;
+      %wusa.hor  = hor;
+      %wusa.mnt  = mnt;
+      %wusa.dMap = dMap;
+      %wusa.latAxis=latAxis;
+      %wusa.lonAxis=lonAxis;
+      %%wusa.latM = latM;
+      %%wusa.lonM = lonM;
+      %
+      odir=cd('../mlib/');
+         mdsa = read_MODIS_1deg_v31( 'aqua', iyr, doi, param,...
+                                         resultDataPath,resultPathSfx );
+         mdst = read_MODIS_1deg_v31( 'terra', iyr, doi, param,...
+                                         resultDataPath,resultPathSfx );
+      cd(odir);
+
+      latAxis = mdst.latAxis;
+      lonAxis = mdst.lonAxis;
+      [lonM,latM] = ndgrid(lonAxis,latAxis); %[nLon,nLat]; -180..180,+90..-90
+      nLat = length(mdst.latAxis);
+      nLon = length(mdst.lonAxis);
+      nRec = length(mdst.day);
+      if length(mdsa.day)~=nRec
+         disp(sprintf('--- %s(): #Aqua ~= #Terra!',mfilename));
+         keyboard
+      end
+
+         
+      %--- Normalize the ins flux to daily flux
+      %
+      dayAqua  = nan(nLon,nLat,nRec);
+      dayTerra = nan(nLon,nLat,nRec);
+      for irc = 1:nRec
+
+         insday = mdsa.day(irc);
+         insFlx = mdsa.dMap(:,irc);
+         if any(~isnan(insFlx(:)))
+            dayAqua(:,:,irc) = ins2daily(... %[nLon,nLat],NaN filled.
+               insFlx,latM,lonM,'aqua',iyr,insday, mu0DataPath,mu0PathSfx );
+         end
+         
+         insday = mdst.day(irc);
+         insFlx = mdst.dMap(:,irc);
+         if any(~isnan(insFlx(:)))
+            dayTerra(:,:,irc) = ins2daily(... %[nLon,nLat],NaN filled.
+               insFlx,latM,lonM,'terra',iyr,insday, mu0DataPath,mu0PathSfx );
+         end
+      end
+
+
+      %--- combine terra and aqua
+      davg = cat(4, dayAqua,dayTerra);
+      davg = nanmean(davg,4); %[nLon,nLat,nDays], NaN filled.
+      mavg = nanmean(davg,3); %[nLon,nLat], NaN filled.
+
+%keyboard;clear all;return
+
+      %--- output files
+      davg(isnan(davg)) = MISS; %MISS filled.
+      mavg(isnan(mavg)) = MISS; %MISS filled.
+      
+      dayFileName = [ avgDataPath,'/',yyyy,avgPathSfx,'/',...
+                      param,'.comb.',yyyy,mm,'.day'];
+      monFileName = [ avgDataPath,'/',yyyy,avgPathSfx,'/',...
+                      param,'.comb.',yyyy,mm,'.mon'];
+      fidday = fopen(dayFileName,'w');
+      fidmon = fopen(monFileName,'w');
+
+         fwrite(fidday,davg,'float32'); %[nLon*nLat*nDays], MISS filled.
+         fwrite(fidmon,mavg,'float32'); %[nLon*nLat], MISS filled, -180..180, 90..-90
+   
+      fclose(fidday);
+      fclose(fidmon);
+   
+   end %for iyr
+   end %for imm
+   
+
+keyboard
+return
+end
+

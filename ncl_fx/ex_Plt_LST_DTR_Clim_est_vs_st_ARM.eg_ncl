@@ -1,0 +1,256 @@
+
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "$nclfx/zenith.ncl"
+load "$nclfx/heatscatter.ncl"
+load "$nclfx/attach_labelbar.ncl"
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+   dynt     = "Allday";"night";"day"; 
+    lev      = 10
+    nStd     = 1.   
+ 
+    optCldMsk = True
+    wkstype   =  "eps";"pdf";"x11";
+;++++++  Parameters  ++++++
+    vName    = "LST" 
+    
+    Sat      = "GOES"  
+    version  = "UMD_RTTOV";"UMD_MORTRAN";
+   
+    St       = "ARM"  
+    facility = "sgpC1"
+    nSt      = 1
+    
+    year     = "2004_2009"
+    
+    UNDEF= -999.0 
+    units      = " (K)"
+    nhour      = 24
+  ;++++++ Plot Parameters  ++++++
+   
+    optOutlier  = True
+     if nStd .eq.0 then
+       optOutlier  = False
+    end if
+    pubFlag     = False
+    svData      = True
+    
+	pltpth  = "./figs/"  
+    pth	    = "./data/"
+    
+    if dynt.eq."day" then
+       ncVar = "lst_dy"
+    else if dynt.eq."night" then
+     ncVar = "lst_nt"
+    else
+     ncVar = "LST"
+    end if 
+    end if     
+ 
+     file1 = "LST_ARMsgpC1_1st_"+lev+"m_inst_hourly_2004_2009.nc" 
+    f1    = addfile(pth+file1,"r")
+    stdata = f1->$ncVar$
+    stdata = where(stdata.ge.200, stdata,UNDEF)
+    ntime  = dimsizes(f1->date)
+    
+    data  = new((/3,ntime*nhour/),"float",UNDEF) 
+      
+    wksname = vName+"_"+St+facility+\
+               "_vs_"+Sat+"_"+version              
+ 
+;++++ Read Estimate data ++++      
+    file2 = "LST_GOES_E_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"
+    if optCldMsk then
+        file2 = file2+"_addCldMsk"
+        pth2  = pth
+    else
+        pth2 = pth+"/cldmsk_orig/"
+    end if ;if optCldMsk    
+    f2    = addfile(pth2+file2+".nc","r")
+    eastdata = f2->lst
+    eastdata = where(eastdata.ge.200, eastdata,UNDEF)
+    
+    
+    pth3 = pth+"/cldmsk_orig/"
+    file3 = "LST_GOES_W_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"
+    f3    = addfile(pth3+file3+".nc","r")
+    westdata = f3->lst
+    westdata = where(eastdata.ge.200, westdata,UNDEF)
+ 
+   
+    stdata@_FillValue    = UNDEF
+	eastdata@_FillValue   = UNDEF
+	westdata@_FillValue   = UNDEF
+    
+	printVarSummary(stdata)
+	printMinMax(stdata,True)
+   
+    printVarSummary(eastdata)
+	printMinMax(eastdata,True)
+    
+    printVarSummary(westdata)
+	printMinMax(westdata,True)
+    
+	 x   = ndtooned(stdata)
+	 x@_FillValue =UNDEF
+	 
+	 
+     y   = ndtooned(eastdata)
+	 y@_FillValue =UNDEF
+ 	 
+	  
+     z   = ndtooned(westdata)
+	 z@_FillValue =UNDEF
+     diff = y-x
+     dof  = num(.not.ismissing(diff))    
+  	 Corr = escorc(y,x);esccr(x,y,0)
+  	 Bias = avg(diff)
+  	 N    = num(.not.ismissing(diff))
+  	
+  	 Std  = stddev(diff)
+  	 RMS  = sqrt(avg(diff^2) )  
+    
+     bias_std = abs(toint(diff/Std))
+     print(Std)
+    ;printMinMax(bias_std,True)
+ 
+	if optOutlier then
+      
+       inds	   = ind(abs(diff).gt.(nStd*Std))
+
+      if .not.all(ismissing(inds)) then
+	   x(inds) = UNDEF
+	   y(inds) = UNDEF
+	   z(inds) = UNDEF
+       diff    = y-x
+	   Corr = escorc(y,x);esccr(x,y,0)
+  	   Bias = avg(diff)
+  	   N    = num(.not.ismissing(diff))
+  	   Std  = stddev(diff)
+  	   RMS  = sqrt(avg(diff^2) ) 
+       
+       delete(inds)	   
+  	  end if
+    end if
+     printMinMax(x,True)
+     printMinMax(y,True)
+	 printMinMax(z,True)
+     
+	data(0,:) = x
+	data(1,:) = y
+	data(2,:) = z
+     
+    printVarSummary(data)
+    	 xlim	=(/0,23/)
+         ylim	= (/265,315/)
+         
+          xlabel = "Hour"
+          ylabel = vName+" (K)"
+         
+        
+    
+        data@_FillValue =UNDEF
+        
+
+        
+        tmp = reshape(data,(/3,ntime,nhour/))
+        x_clim = dim_avg_n_Wrap(tmp,1)
+       
+        printMinMax(x_clim(:,:),True) 
+        printVarSummary(x_clim)	
+if svData then        
+        
+    fout = "DTR_Clim_GOES_"+St+facility+".nc"
+    system("rm -f "+fout)
+    f = addfile(fout,"c")
+    f->dtr_clim  = x_clim        
+    
+
+   
+   
+   
+   
+end if ;svData
+	
+        wks = gsn_open_wks(wkstype,pltpth+"Line_DTR_"+wksname+"_Std"+nStd )
+        res = True
+        res@gsnDraw            = False        
+        res@gsnFrame           = False         
+        res@gsnMaximize        = True
+
+       ;res@tiMainString       = capStr
+        res@tiMainFontHeightF  = 0.02
+
+        res@trXMinF = xlim(0)
+        res@trXMaxF = xlim(1)
+        res@trYMinF = ylim(0)
+        res@trYMaxF = ylim(1)
+
+        res@tmXBMajorThicknessF     = 4
+        res@tmYLMajorThicknessF     = 4
+        res@tmXBLabelFontThicknessF = 4
+        res@tmYLLabelFontThicknessF = 4
+
+        res@tmXBMode          = "Manual"
+        res@tmXBTickSpacingF  = 6
+
+        res@tmBorderThicknessF= 4.0
+        res@tmLabelAutoStride = True
+        res@tmYROn            = False
+        res@tmXTOn            = False
+        res@tmYLMinorOn       = False
+        res@tmXBMinorOn       = False
+        res@tmXBLabelFontHeightF    = 0.03
+        res@tmYLLabelFontHeightF    = 0.03
+
+        res@tmYLLabelDeltaF   = -0.7
+        res@tmXBLabelDeltaF   = 0.2
+
+        res@tiYAxisString         = ylabel
+       ;res@tiYAxisOffsetXF       = 0.01
+        res@tiYAxisFontThicknessF = 5
+        res@tiYAxisFontHeightF    = 0.03
+        res@tiXAxisString         = xlabel
+       ;res@tiXAxisOffsetYF       = 0.01
+        res@tiXAxisFontThicknessF = 5
+        res@tiXAxisFontHeightF    = 0.03
+
+        res@xyDashPattern  = 0 
+        res@xyLineThicknessF = 4.
+        res@xyLineColors := (/"blue","red","green","purple"/) ; 
+        res@xyMarkLineMode = "MarkLines"               
+        res@xyMarkers      = (/6,11,9,0/)               
+        res@xyMarkerColors := (/"blue","red","green","purple"/)  
+        res@xyMarkerThicknessF = 2.5
+        res@xyMarkerSizeF     = 0.008    
+        res@pmLegendDisplayMode    = "Always"           
+
+        res@pmLegendSide           = "Top"               
+        res@pmLegendParallelPosF   = .2                 
+        res@pmLegendOrthogonalPosF = -0.375              
+
+        res@pmLegendWidthF         = 0.075                
+        res@pmLegendHeightF        = 0.14              
+        res@lgLabelFontHeightF     = .015  
+
+        res@lgLabelOffsetF         = 0.1  
+       ;res@lgLabelJust            ="centerright"            
+        res@lgOrientation          = "vertical"
+        res@lgPerimOn              = False               
+        res@xyExplicitLegendLabels = (/"ARM/SGPC1","GOES_EAST","GOES_WEST"/)
+
+        plot = gsn_csm_y(wks,x_clim(:,:),res)  
+        draw(plot)
+
+        frame(wks)
+end
+    ;StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    ;StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    ;stNames= (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)

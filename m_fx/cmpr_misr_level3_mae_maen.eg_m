@@ -1,0 +1,13 @@
+fl1='/data/srb4/wchen/MISR/MISR_AM1_CGAS_MAY_2017_F15_0031.hdf';
+fl2='/data/srb4/wchen/MISR/MISR_AM1_CGAS_MAY_2017_F15_0032.nc';
+fileinfo = hdfinfo(fl1);
+sdsinfo = fileinfo.Vgroup.Vgroup(1).SDS;
+aodinfo = sdsinfo(5);
+disp(aodinfo)
+a=hdfread(fl1,'Optical depth average');
+ncdisp(fl2)
+% ncid =netcdf.open(fl2,'NOWRITE');
+% varid = netcdf.inqVarID(ncid,'/Aerosol_Parameter_Average/','Aerosol_Optical_Depth');
+% disp(varid)
+ misrAODtmp = ncread(fl2,'/Aerosol_Parameter_Average/Aerosol_Optical_Depth');
+keyboard

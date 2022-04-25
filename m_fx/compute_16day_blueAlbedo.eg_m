@@ -1,0 +1,471 @@
+
+%---------------------------------------------------------------------
+function comptue_MODIS_blueAlb()
+%---------------------------------------------------------------------
+%  compute 16-day average blue sky albedo.
+
+
+   yrV = [2000:2010];
+   dLL = 1 %2.5; %1 or 2.5 degree.
+   NY = 180/dLL;
+   NX = 360/dLL;
+   latBeg = -90+dLL/2;
+   lonBeg = -180+dLL/2; % Lon = -180 ~ +180
+   latV = latBeg:dLL:(latBeg+180-dLL/2);
+   lonV = lonBeg:dLL:(lonBeg+360-dLL/2);
+   %latM = repmat(latV',1,NX);
+   %lonM = repmat(lonV,NY,1);
+   
+   %hourV = 0:3:21; %gmt time to compute solar zenith angle.
+   hourV = 0:23; %gmt time to compute solar zenith angle.
+   
+   brdfPath = ['/data/gcip/srb/modis_MOTA/MCD43C1.005/'];
+   savePath = ['~/srb/data2/sat/modis/albedo/blueSkyAlbedo_16day/'];
+   
+   D2R = pi/180;
+   misg = -1000;
+   
+
+   %-- read LUT for diffuse ratio
+   %
+   NAER  = 2;
+   NBAND = 10;  %/* MODIS defaults */
+   NSZN  = 90;
+   NOD   = 50;
+   lutFile = '~/srb/dev2/data/sat/modis/bluesky/skyl_lut.dat';
+
+aerIdx = 1; %1=land, 2=ocean;
+bandIdx = 10; %shortwave total
+   
+   skyLUT = nan(NAER,NBAND,NSZN,NOD);
+   
+   fid = fopen(lutFile);
+   for(aer=1:NAER) %1--land, 2--ocean
+
+      aerhd = fscanf(fid,'%s',2);
+
+      for(band=1:NBAND)
+       
+         bandhd = fscanf(fid,'%s',2);
+         odhd = fscanf(fid, '%s', NOD+1);
+            
+         for(szn=1:NSZN)
+               
+            sznhd = fscanf(fid, '%s',1);
+            skyLUT(aer,band,szn,1:NOD) = fscanf(fid,'%f',NOD);
+         end %szn
+      end %band
+   end %aer
+   fclose(fid);
+   
+
+
+   for iyr = yrV
+      
+      %-- get brdf file names for every month.
+      fileList = dir( [brdfPath,'/',num2str(iyr,'%4.4d'),'*'] );
+      nFile = length(fileList);
+
+      for ifl = 1:nFile
+      
+         fname = fileList(ifl).name; %ex. 2000.12.18
+         fyr = str2num(fname(1:4));
+         fmo = str2num(fname(6:7));
+         fdy = str2num(fname(9:10));
+         %ymd = fyr*10000+fmo*100+fdy; %20001218
+      
+         disp(['--- doing ', fname])
+
+         yStr = num2str(fyr,'%4d');
+         mStr = num2str(fmo,'%2.2d');
+         dStr = num2str(fdy,'%2.2d');
+
+%test
+%if fyr~=2003 || fmo~=7 || fdy~=12; continue; end
+
+         %-- read aod data for current 16-day period.
+         %   16-day average of MODIS aod, combined of Terra and Aqua with
+         %   missing filled by MISR monthly mean.
+         %
+         fileName = ['~/srb/data2/sat/modis/aodxl/combined_16day_fillMISR/'...
+                     'aod_modis_16day_fillMISR_',yStr,mStr,dStr,'.dat'];
+         fid = fopen(fileName);
+            aod = fread(fid,NY*NX,'float32'); %[NY*NX,1]
+         fclose(fid);
+         aod(aod<-99) = NaN;
+                  
+         aodIdx = fix( aod./0.02+0.5 ) + 1; %/*get optical depth index for skyLUT*/
+         aodIdx(aodIdx>50) = 50; %[NY*NX,1]
+
+         
+         %-- read brdf parameters.
+         %   available for every 8 days. every one is for 16-day 
+         %   period. The filename date is the beging of  the 16-day
+         %   period.
+         %
+         filePttn = [brdfPath,'/', yStr,'.',mStr,'.',dStr,'/*.hdf'];
+         fileName = dir( filePttn );
+         if length(fileName) >1
+            disp('--- More than one .hdf file exist! ')
+            keyboard
+         end
+         fileName = [brdfPath,'/',...
+                     yStr,'.',mStr,'.',dStr,'/',fileName.name];
+        
+         [pArr] = modisAlb_bsws( fileName ); %[NY,NX,3]
+
+         %-- downscaling the brdf parameters. 
+         %   May be not good to be it at this step!
+         %   dnscl need the dimension to be [NY,NX,NT] format.
+         %
+         odir=cd('~/srb/dev2/mshare/');
+         pArr = dnscl(pArr,0.05,dLL,'median'); %[NY,NX,3]
+         cd(odir)
+         
+         pArr = reshape(pArr,[NY*NX,3]);
+
+
+         %-- white-sky albedo doesn't relay on solar zenith angle
+         wsa = pArr(:,1) + pArr(:,2)*(0.189184) + pArr(:,3)*(-1.377622);
+         %-- down sacling
+         %wsa = reshape(wsa,[NY,NX]);
+         %[ nwsa ]=dnscl( wsa,0.05, dLL, 'median' );
+
+
+         %-- compute the daily mean blue albedo for the 
+         %   middle day of the 16-day period.
+         %
+         doy = datenum(fyr,fmo,fdy)-datenum(fyr,1,1) + 1;
+         doy = doy + 8; %center day of the 16 period.
+
+         %-- for computing solar zenith angle.
+         latM = repmat(latV',1,NX); %[NY,NX]
+         lonM = repmat(lonV,NY,1);  %[NY,Nx]
+         latM = reshape(latM, [NY*NX,1]); %[NY*NX,1]
+         lonM = reshape(lonM, [NY*NX,1]); %[NY*NX,1]
+
+         out16M = zeros(NY*NX,1);
+         out16N = zeros(NY*NX,1);
+         for ihh = hourV %0:3:21
+
+            %--compute solar zenith angles
+            %
+            gmt = ihh;
+            [dec,r,eqt,rsun] = Sundat(iyr,doy,gmt);
+   
+            HA = (gmt + eqt - 12. + (lonM./15.)) * 15.;
+            mu = sin( latM*D2R ).*sin( dec )...
+               + cos( latM*D2R ).*cos( dec ).*cos( HA*D2R );
+
+            %szn = acos(mu)*180/pi; %in degrees
+            %szn(szn>90) = szn(szn>90)-180; %-90~90;
+            mu(mu<=0) = nan; %don't cumulate night time values.
+            szn = acos(mu); %in radians; [NY*NX,1]
+
+
+            %-- computer MODIS black and white sky albedo.
+            %
+            szn2 = szn.*szn;
+            szn3 = szn2.*szn;
+
+            %-- black-sky albedo; sometimes bsa>1
+            bsa = pArr(:,1) ...
+                + pArr(:,2) .* (-0.007574 + (-0.070987 * szn2) + (0.307588 * szn3))...
+                + pArr(:,3) .* (-1.284909 + (-0.166314 * szn2) + (0.041840 * szn3));
+   
+            %wsa = pArr(:,1) + pArr(:,2)*(0.189184) + pArr(:,3)*(-1.377622);
+
+            %-- down sacling
+            %bsa = reshape(bsa,[NY,NX]);
+            %[ nbsa ]=dnscl( bsa,0.05, dLL, 'median' );
+         
+            %--compute Blue-sky albedo
+            %
+            sznIdx = fix( szn*180/pi + 0.5 ) + 1;
+            sznIdx(sznIdx>90)=90; %[NY*NX,1]
+
+            sznIdx = reshape( sznIdx,NY*NX,1 ); %vector
+            linearIdx = sub2ind( size(skyLUT),...
+                                 repmat(aerIdx, NY*NX,1),...
+                                 repmat(bandIdx, NY*NX,1),...
+                                 sznIdx,...
+                                 aodIdx);
+
+            skyl = nan(NY*NX,1);
+            notNaN = ~isnan(linearIdx);
+            skyl(notNaN) = skyLUT(linearIdx(notNaN)); %vector(NY*NX,1)
+
+            blu = nan(NY*NX,1);
+            blu(notNaN) = wsa(notNaN) .* skyl(notNaN)...
+                        + bsa(notNaN) .* (1 - skyl(notNaN));
+            blu(blu<0) = 0;
+            blu(blu>1) = 1;
+
+            notNaN = ~isnan(blu);
+            out16M(notNaN) = out16M(notNaN) + blu(notNaN);
+            out16N(notNaN) = out16N(notNaN) + 1;
+      
+            %if ihh==0
+            %   disp([iyr,imm,idd])
+            %end
+         end %ihr
+
+         nz = out16N>0;
+         out16M(nz) = out16M(nz) ./ out16N(nz); %[NY*NX,1]
+         out16M(~nz) = misg;
+
+%keyboard
+%disp('---no write out!')
+%%{
+         outname = [savePath,'/','alb_bluesky_16day_',yStr,mStr,dStr,'.dat'];
+         fid = fopen(outname,'w');
+            fwrite(fid,out16M,'float32'); %[NY,NX], -180~180,-90~90
+         fclose(fid);
+%}
+
+%keyboard
+%a=out16M;a(a<-99)=nan;
+%imagesc(flipud(reshape(a,NY,NX)));colorbar
+      end %ifl
+
+   end %iyr
+
+
+
+%   save( ['~/srb/data/sat/D1/D1_in/giss_monthly_codp_00-06.mat'], 'outM','yrV' );
+
+   %%--read MODIS Black-sky and White-sky albedo
+   %%  MODIS filled black and white albedo. The black albedo is
+   %%  for solar noon only.
+   %%
+   %yy1Str = num2str(mod(yrV(1)  ,100),'%2.2d');
+   %yy2Str = num2str(mod(yrV(end),100),'%2.2d');
+   %matFile = ['~/srb/data2/sat/modis/albedo/filledAlbedo/',...
+   %           'modis_bwAlb_',num2str(dLL,'%3.1f'),...
+   %           'deg_mon_map_',yy1Str,'-',yy2Str,'_00-04only.mat'];
+   %%odir=cd('~/srb/dev2/modisBlueAlbedo');
+   %%[mdsAlb] = getImg_alb_MODIS_mon( yrV, dLL); %[NY,NX,NT,b/w];-180~180
+   %%cd(odir)
+   %%save( matFile, 'mdsAlb' );
+   %load( matFile );
+   %mdsBS = mdsAlb(:,:,:,1); %[NY,NX,NMonth]
+   %mdsWS = mdsAlb(:,:,:,2); %[NY,NX,NMonth]
+   
+   %BS = mdsBS(:,:,monIdx); %[NY,NX]
+   %WS = mdsWS(:,:,monIdx); %[NY,NX]
+   %OD = mdsAod(:,:,monIdx); %(NY,NX)
+   
+   %BS = reshape(BS, NY*NX,1); %vector
+   %WS = reshape(WS, NY*NX,1); %vector
+   %OD = reshape(OD, NY*NX,1); %vector
+   
+
+keyboard
+end
+
+
+
+
+%---------------------------------------------------------------------
+function [pArr] = modisAlb_bsws( brdfFile )
+%---------------------------------------------------------------------
+
+   %brdfFile = ['./MCD43C1.A2003249.005.2008004095154.hdf'];
+
+   paraNames = {'BRDF_Albedo_Parameter1_shortwave', ...
+                'BRDF_Albedo_Parameter2_shortwave', ...
+                'BRDF_Albedo_Parameter3_shortwave'};
+
+   dLL = 0.05;
+   NY  = 180/dLL;
+   NX  = 360/dLL;
+  
+   pArr = nan(NY,NX,3);
+
+
+   %piso = hdfread(brdfFile, 'BRDF_Albedo_Parameter1_shortwave');
+   %pvol = hdfread(brdfFile, 'BRDF_Albedo_Parameter2_shortwave');
+   %pgeo = hdfread(brdfFile, 'BRDF_Albedo_Parameter3_shortwave');
+   
+
+   fid=hdfsd('start',brdfFile,'read');
+   %[nData,nGlbAttr,stat]=hdfsd('fileinfo',fid);
+   for ip = 1:length(paraNames)
+      pName = paraNames{ip};
+      dsIdx = hdfsd( 'nametoindex', fid, pName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', fid, dsIdx );
+      %[dsname, dsndims, dsdims, dstype, dsatts, stat] =...
+      %                                      hdfsd( 'getinfo', dsHdl );
+      dsndims  = 2;
+      dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, stat] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+
+      attHdl        = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+      [sclfac,stat] = hdfsd( 'readattr', dsHdl, attHdl );
+      
+      attHdl        = hdfsd( 'findattr', dsHdl, 'add_offset' );
+      [offset,stat] = hdfsd( 'readattr', dsHdl, attHdl );
+      
+      attHdl        = hdfsd( 'findattr', dsHdl, '_FillValue' );
+      [misval,stat] = hdfsd( 'readattr', dsHdl, attHdl );
+
+      ds(ds==misval) = NaN;
+      pArr(:,:,ip) = double(flipud(ds'))*sclfac+offset; %-180~180, -90~90
+
+      stat = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+   end
+   stat = hdfsd( 'end',fid ); %need for WRITTING.
+   
+
+   %%-- computer actural albedo
+   %%
+   %szn  = 60*pi/180; %in radian
+   %szn2 = szn.*szn;
+   %szn3 = szn2.*szn;
+   % 
+   %%--black-sky albedo
+   %bsa = pArr(:,:,1) ...
+   %    + pArr(:,:,2) .* (-0.007574 + (-0.070987 * szn2) + (0.307588 * szn3))...
+   %    + pArr(:,:,3) .* (-1.284909 + (-0.166314 * szn2) + (0.041840 * szn3));
+   % 
+   %wsa = pArr(:,:,1) + pArr(:,:,2)*(0.189184) + pArr(:,:,3)*(-1.377622);
+
+
+%keyboard  
+end
+
+
+
+
+
+
+
+%C**********************************************************************C
+   function [Decl, RtAsc, Eqtime, Rsun] = Sundat( year, doy, gmt )
+%C**********************************************************************C
+%C
+%C     FOR A GIVEN DAY OF THE YEAR and a specific GMT time 
+%C     COMPUTES THE EARTH-SUN DISTANCE FACTOR
+%C     AND THE DECLINATION
+%C
+%C   I N P U T   V A R I A B L E:
+%C
+%C   year
+%C   doy  = DAY OF THE YEAR (1 ON 1 JANUARY)
+%C   gmt  = GMT time in hours
+%C
+%C   O U T P U T   V A R I A B L E S :
+%C
+%C   Decl    :  Declination of the Sun (in radians)
+%C   RtAsc   :  Right Ascension of the Sun (in readians)
+%C   Rsun    :  Earth-sun distance factor ( square of the ratio of mean
+%C              distance to actual one)
+%C   Eqtime  :  Equation of time (in hours)
+%C
+%
+%      Integer, intent(in)  :: year, doy
+%      real,    intent(in)  :: gmt
+%      real,    Intent(out) :: Rsun, Decl, RtAsc, Eqtime
+%
+
+   %PI  = 3.14159265359;
+   D2R = pi/180.0;
+   R2D = 180.0/pi;
+
+   [JD,JC] = JulianTime(year, doy, gmt);
+
+   %--- mean longitude of the sun (longitude of the 
+   %    dynamical mean sun,
+   %    referred to the mean equinox of the date).
+   %    In degree.
+   L0 = 280.46645 + 36000.76983*JC + 0.0003032*JC*JC;
+    
+   %--- mean anomaly of the sun (anomaly of the dynamical mean sun).
+   %    In degree.
+   M0 = 357.52910 + 35999.05030*JC - 0.0001559*JC*JC;
+      
+   %--- Sun's equation of center. (difference between the mean 
+   %    anomaly and the true anomaly)
+   %    In degree.
+   EOC  = (1.914600 - 0.004817*JC) * sin(M0*D2R)...
+        + (0.019993 - 0.000101*JC) * sin(2*M0*D2R);
+
+   %--- True longitude of the Sun, referred to the mean equinox of 
+   %    the date.
+   %    In degree
+   L = L0 + EOC;
+   
+   %--- True anomaly of the Sun
+   %    In degree
+   M = M0 + EOC;
+
+   
+   
+   %--- mean obliquity of the ecliptic, or inclination of the 
+   %    Earth's axis. 
+   %    In degree
+   Obq = 23.4392911  ...
+       - 0.01300416667*JC  ...
+       - 0.00000016389*JC*JC;
+  
+   %--- the Sun's Declination
+   %    In degree
+   Dec = asin( sin(Obq*D2R)*sin(L*D2R) ) * R2D;
+
+   %--- the Sun's right ascensioin
+   %    In degree
+   RA = atan2( (cos(Obq*D2R)*sin(L*D2R)), (cos(L*D2R)) ) * R2D;
+
+
+   
+   %--- Equation of time; without correction for aberration and 
+   %    nutation
+   %    In degree
+   EOT = L0 - RA;
+
+
+
+   %--- eccentricity of the Earth's orbit.
+   e = 0.016708617 - 0.000042037*JC - 0.0000001236*JC*JC;
+
+   %--- the sun-earth distance, expressed in astronomical units.
+   R = (1.000001018*(1-e*e)) / (1+e*cos(M*D2R));
+
+
+
+
+   Decl   = real(Dec*D2R);
+   
+   RtAsc  = real(RA*D2R);
+
+   Eqtime = mod(EOT, 360.0);
+   if (Eqtime>180.0);  Eqtime=Eqtime-360.0; end
+   Eqtime = real(Eqtime/15.0);
+
+   Rsun   = real(1./(R*R));
+
+end
+
+%**********************************************************************C
+   function [ JD, JC ] = JulianTime( year, doy, gmt )
+%**********************************************************************C
+%   Compute Julian day
+%   JD0 is the Julian day to Januany 0.0 of the year.
+%   January 0.0 = December 31.0 of the preceding year, 
+%   The formua only good for years 1901-2099 inclusivly.
+%      Integer, intent(in)  :: year, doy
+%      real,    intent(in)  :: gmt
+%      real(R8),intent(out) :: JD,JC
+%      
+%      real(R8)  ::  JD0
+
+   JD0 = 1721409.5 + fix(365.25 * (year-1));
+   JD  = JD0 + doy + gmt/24.;
+   
+   %--- Julian Centuries from the epoch J2000.0 (=2000/1/1.5 TD). 
+   JC = (JD - 2451545.0)/36525;
+
+end

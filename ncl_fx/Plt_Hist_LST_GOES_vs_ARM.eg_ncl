@@ -1,0 +1,151 @@
+load "$nclfx/substring.ncl"
+load "./statistics.ncl"
+load "./Hist_plt_2.ncl"
+begin
+;*******************************
+; specification and data put in 
+;*******************************  
+;DRA: Time difference 8h
+;++++ Head +++++
+    dynt     = "Allday";"night";"day"; 
+    lev      = 10
+    nStd     = 0.   
+    SatP     = "E";"W";
+    optCldMsk = False
+    wkstype   = "eps";"x11"; 
+;++++++  Parameters  ++++++
+    vName    = "LST" 
+    
+    Sat      = "GOES"  
+    version  = "UMD_RTTOV";"UMD_MORTRAN";
+   
+    St       = "ARM"  
+    facility = "sgpC1"
+    nSt      = 1
+    
+    year     = "2004_2009"
+    
+    UNDEF= -999.0 
+    units      = " (K)"
+    
+  ;++++++ Plot Parameters  ++++++
+    HistPlt     = False
+    PDFplt      = False
+    
+    optOutlier  = True
+    if nStd .eq.0 then
+       optOutlier  = False
+    end if
+  
+  ;++++++ Path  ++++++
+    
+	pltpth  = "./figs/"  
+    pth	    = "./data/"
+;++++ Read Ground truth ++++ 
+    if dynt.eq."day" then
+       ncVar = "lst_dy"
+    else if dynt.eq."night" then
+     ncVar = "lst_nt"
+    else
+     ncVar = "LST"
+    end if 
+    end if     
+    file1 = "LST_ARMsgpC1_1st_"+lev+"m_inst_hourly_2004_2009.nc" 
+    f1    = addfile(pth+file1,"r")
+    stdata = f1->$ncVar$
+    stdata = where(stdata.ge.200, stdata,UNDEF)
+;++++ Read Estimate data ++++      
+    file2 = "LST_GOES_E_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"
+    if optCldMsk then
+        file2 = file2+"_addCldMsk"
+        pth2  = pth
+    else
+        pth2 = pth+"/cldmsk_orig/"
+    end if ;if optCldMsk    
+    f2    = addfile(pth2+file2+".nc","r")
+    eastdata = f2->lst
+    eastdata = where(eastdata.ge.200, eastdata,UNDEF)
+    
+    
+    pth3 = pth+"/cldmsk_orig/"
+    file3 = "LST_GOES_W_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"
+    f3    = addfile(pth3+file3+".nc","r")
+    westdata = f3->lst
+    westdata = where(eastdata.ge.200, westdata,UNDEF)
+ 
+   
+    stdata@_FillValue    = UNDEF
+	eastdata@_FillValue   = UNDEF
+	westdata@_FillValue   = UNDEF
+    
+	printVarSummary(stdata)
+	printMinMax(stdata,True)
+   
+    printVarSummary(eastdata)
+	printMinMax(eastdata,True)
+    
+    printVarSummary(westdata)
+	printMinMax(westdata,True)
+    
+    eastdata = where(ismissing(westdata),UNDEF,eastdata)
+    westdata = where(ismissing(eastdata),UNDEF,westdata)
+    if SatP.eq."E" then
+        estdata = eastdata
+    else
+        estdata = westdata
+    end if
+    
+;************************************************
+; plotting 
+;************************************************
+	
+      wksname = vName+"_"+St+"_"+facility+"_"+lev+"m"+\
+               "_vs_"+Sat+"_"+SatP+"_"+version+"_"+dynt+"_"+year+"_Std"+nStd
+    
+      if optCldMsk then
+         wksname = wksname+"_AddCldMsk"
+      end if
+        stdata(731:1095,:)=UNDEF        
+        x = ndtooned(stdata(:,:))
+        y = ndtooned(estdata(:,:,0))
+  
+        x@_FillValue =UNDEF
+        y@_FillValue =UNDEF
+   
+    diffxy = xyStatistics(x,y,nStd,optOutlier,0)
+    printMinMax(diffxy,True)
+    ;+++ Best fit
+	;rc		= regline(x,y)
+    ;z       = rc*(x-rc@xave)+rc@yave
+    ;printVarSummary(z)
+	if optOutlier then
+        Nstr =  "N: "+diffxy@N;+" ("+sprintf("%.1f",tofloat(diffxy@N)/tofloat(diffxy@dof)*100.)+"%)"
+    else
+         Nstr =  "N: "+diffxy@dof
+    end if;optOutlier
+	
+    
+    statstr = (/"Corr: "+sprintf("%.2f",diffxy@Corr)+"~C~"+\
+			  "Bias: "+sprintf("%.2f",diffxy@Bias)+"("+sprintf("%.2f",abs(diffxy@Bias/avg(x)*100.))+"%)"+"~C~"+\
+			  "RMSE: "+sprintf("%.2f",diffxy@RMS)+"("+sprintf("%.2f",abs(diffxy@RMS/avg(x)*100.))+"%)"+"~C~"+\
+			  "Std: "+sprintf("%.2f",diffxy@Std)+"("+sprintf("%.2f",abs(diffxy@Std/avg(x)*100.))+"%)"+"~C~"+Nstr/)
+    print(statstr)
+ 	
+ 
+    print(".........Histogram Plotting..........")
+    if HistPlt then 
+      npct     = 2
+      npct@pct1 = 1000.
+      npct@hist1 = -10
+      npct@hist2 = 10
+      npct@histnbin = 21
+      npct@histc  = "blue"
+      tmp = diffxy
+      tmp = where(abs(diffxy).gt.npct@hist2+1.5,UNDEF,diffxy)
+      printMinMax(tmp,True)
+ 
+      Hist_plt_diff_temp(tmp,npct,statstr,wkstype,pltpth,"Hist_diff_"+wksname,\
+(/"LST.DIFF"+units,"   "+Sat+"~B~"+SatP+"~N~~C~     .vs.~C~"+St+"/"+facility/),1)
+ end if   
+       
+end

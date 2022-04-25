@@ -1,0 +1,803 @@
+%----------------------------------------------------------------------
+function jumpin(timeV, satV, prepOutPath,saveSRC, gridRes)
+%----------------------------------------------------------------------
+
+   if gridRes == 1.0
+
+      prepare_aerosol_1deg( timeV, satV, prepOutPath,saveSRC )
+
+   elseif gridRes == 0.05
+
+      prepare_aerosol_5km( timeV, satV, prepOutPath,saveSRC )
+   
+   end
+   
+end
+
+
+%----------------------------------------------------------------------
+function prepare_aerosol_1deg( timeV, satV, prepOutPath, saveSRC )
+%----------------------------------------------------------------------
+
+   %-- To clear the **persistent** varialbes in the SUB functions.
+   %   This won't affect the upper level calling function workspace,
+   %   since the calling functions are locked.
+   %   to check use 'inmem' and 'mislocked' commands
+   clear functions
+
+   resultPath0 = [prepOutPath, 'aerosol/'];
+%==========================================================================
+   %---Sat_dat MODIS
+   %inPathModisAer = '/data/pkgroup1/xiaolei/WUSA/';
+   %inPathModisAer = '/aosc/helios2/ytma/data_helios2/sat/MODIS/Level3/L3raw/';
+   %inPathModisAer = '/aosc/ceop/Data/Sat_Data/MODIS/'; %2002..2013;
+   %inPathModisAer = '/data/crash/wchen/MODIS/ShortWave/Input/Sat_Data/collection51/'; % from 2002-2014 contains symbol links;
+   inPathModisAer = '/data/srb8/wchen/LW/modis_hdf/';
+   %---MISR monthly data
+   % inPathMisrAer = '/aosc/ceop/Data/MISR/';%2002..2013;
+   %inPathMisrAer  = '/data/crash/wchen/MODIS/ShortWave/Input/MISR/'; % 2002-2014 contains symbol links
+   inPathMisrAer  = '/data/srb4/wchen/MISR/'; 
+   %--- surface type needed for filling aod
+   %inPathSfcTyp_5km = ['/aosc/ceop/Data/Sat_Data/MODIS/aux/'];
+   inPathSfcTyp_1deg = ['./'];
+   %inPathSfcTyp_1deg = ['/data/crash/wchen/MODIS/ShortWave/Input/Aux/'];
+   
+   %
+   %if gridRes==0.05
+   %   read_surface_type = @read_surface_type_5km; %int8 type
+   %   inPathSfcTyp = inPathSfcTyp_5km;
+   %elseif gridRes==1.0
+   %   read_surface_type = @read_surface_type_1deg; %single float
+   %   inPathSfcTyp = inPathSfcTyp_1deg;
+   %end
+%==========================================================================
+
+
+   %--
+   paramC = {...
+              'aerOpd',   'Aerosol_Optical_Depth_Land_Ocean_Mean';...
+            };
+             
+
+   %--- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+   
+   %---
+   for isat =1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+%==========================================================================
+%{                     
+         if ismember(iyr,[2003:2005,2007])
+            hdfPath = [inPathModisAer,'/',yyyy,'/1_deg/'];
+         elseif ismember(iyr,[2006,2008:2013])
+            hdfPath = [inPathModisAer,'/',yyyy,'/'];
+         end
+%}
+            hdfPath = [inPathModisAer,'/',yyyy,'/'];
+%==========================================================================
+
+         nameList = dir([hdfPath,'/',satStr,'08_D3.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = '9999';%fileName(19:22);
+            %hrmin = str2num(hhmm);
+            
+            %disp(sprintf('--- %s(): %04d/%02d/%02d-%s',mfilename,iyr,imon,idy,hhmm))
+            disp(['prep aerosol... ',fileName])
+      
+            %--- read the MODIS swath aerosol data
+            %
+            fullName = [hdfPath, fileName];
+            datC = cell( size(paramC,1), 1);
+            hdfID = hdfsd('start',fullName,'read');
+               odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+               for ip = 1:size(paramC,1)
+                  datC{ip} = obtain_hdf_datafield(...
+                           hdfID, paramC{ip,2}, 'doScl','doNaN');
+               end
+               cd(odir);
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+            aodM = datC{ find( strcmp('aerOpd', paramC(:,1)) ) };
+
+            latM = repmat( [89.5:-1:-89.5], [size(aodM,1),1] );
+            lonM = repmat( [-179.5:1:179.5]', [1,size(aodM,2)] );
+
+
+            
+            %----- Fill the missing with MISR monthly mean
+            %      aerosol values.
+            %
+            [aodM] = fill_aerosol_1deg( iyr,imon,idy,doy,...
+                                        latM,lonM,aodM,...
+                                        inPathMisrAer,...
+                                        inPathSfcTyp_1deg );
+
+
+%keyboard; clear all; return
+
+            %-- output the prepared aerosol data
+            %
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'aer.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(aodM), 'int32');
+               fwrite(fid, size(aodM),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, aodM, 'float32');
+            fclose(fid);
+
+               
+         end %--for ifl = 1:numFiles
+      
+      end %--for atv=timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+
+
+
+%----------------------------------------------------------------------
+%Neigher an anonymous function or a nested function work here! 
+%function y=fillnan(x); y=x; y(isnan(y))=nanmean(x(:)); end
+%function y=fillnan(x); y=x.data; y(isnan(y))=nanmean(y(:)); end
+function y=slidOUTfill(x)
+   idx = fix(size(x,1)/2) + 1; %fill the central pixel. Size(x,1) must be odd number!!
+   x(x==0)=NaN; % aod==0 --> NaN, to deal with zero padding. Becareful log scale aod!
+   std=nanstd(x);
+   y=x(idx,:);
+   nz=abs(y)>3*std;
+   y(nz)=exp(nanmean(log(x(:,nz))));
+end
+function y=slidNaNfill(x)
+   idx = fix(size(x,1)/2) + 1; %fill the central pixel. Size(x,1) must be odd number!!
+   x(x==0)=NaN; % aod==0 --> NaN, to deal with zero padding. Becareful log scale aod!
+   y=x(idx,:);
+   nz=isnan(y);
+   y(nz)=exp(nanmean(log(x(:,nz))));
+end
+%----------------------------------------------------------------------
+function [rtnAOD] = fill_aerosol_1deg(...
+                    iyr,imon,idy,doy, latM,lonM,aodM,...
+                    inPathMisrAer, inPathSfcTyp_1deg )
+%----------------------------------------------------------------------
+
+   persistent First
+   persistent sfcTyp rgnMask Land Ocean
+   persistent crntYrMon
+   persistent misrAOD
+
+   %misrAerPath0 = '/data/ceop4/srb/backup_hwang/Data/misr/';
+   misrAerPath0 = inPathMisrAer;
+
+
+   %--- Get surface type information.
+   %    needed for doing regional average.
+   %
+   if isempty(First) || First==true
+
+      %   IGBP_Land_Cover_Type
+      %   for  5km: 8-bit integer,    10800 x 21600
+      %   for 1deg: single float.
+      %        0  water = 0
+      %        1  evergreen needleleaf forest = 1
+      %        2  evergreen broadleaf forest = 2
+      %        3  deciduous needleleaf forest = 3
+      %        4  deciduous broadleaf forest = 4
+      %        5  mixed forests = 5
+      %        6  closed shrubland = 6
+      %        7  open shrublands = 7
+      %        8  woody savannas = 8
+      %        9  savannas = 9
+      %        10 grasslands = 10
+      %        11 permanent wetlands = 11
+      %        12 croplands = 12
+      %        13 urban and built-up = 13
+      %        14 cropland/natural vegetation mosaic = 14
+      %        15 snow and ice = 15
+      %        16 barren or sparsely vegetated = 16
+      %        17 unclassified = -2
+      %
+      read_surface_type = @read_surface_type_1deg; %single float
+      inPathSfcTyp = inPathSfcTyp_1deg;
+      [sfcTyp, sfcTypRes, sfcTypLat1, sfcTypLon1] = ...
+                              read_surface_type( inPathSfcTyp );
+
+      gridStep = 1.0;
+      latBeg=+89.5;  latEnd=-89.5; latDir=-1; %=+1 from S-->N, =-1 from N-->S; %yingtao's version, latBegin start from +90
+      lonBeg=-179.5; lonEnd=179.5; lonDir=+1; %=+1 from W-->E, =-1 from E-->W, lon is always W-->E; % Lon = -180 ~ +180
+      if sfcTypRes~=gridStep || sfcTypLat1~=latBeg || sfcTypLon1~=lonBeg
+         disp(sprintf('--- %s(): sfcTypMap mismatch! ',mfilename));
+         keyboard
+      end
+      lonAxis=[lonBeg:lonDir*gridStep:lonEnd]; %-60 may not be exactly. The first point center around -150
+      latAxis=[latBeg:latDir*gridStep:latEnd]; %60 may not be exactly. The first point center around 20
+      [xM,yM] = ndgrid(lonAxis,latAxis); %[nLon,nLat], -180..180, +90..-90
+
+
+      plm = 65;
+      Land     = sfcTyp~=0;
+      Ocean    = sfcTyp==0;
+      NorPolar = yM>=+plm;
+      SouPolar = yM<=-plm;
+      Polar    = NorPolar | SouPolar;
+
+      Desert      = ~Polar & sfcTyp==16 | sfcTyp==13;
+      PermIce     = ~Polar & sfcTyp==15;
+      OthSfc      = ~Polar & ~(Desert|PermIce);
+      NorMidLand  = ~Polar & sfcTyp~=0 & yM>=0 & OthSfc;
+      SouMidLand  = ~Polar & sfcTyp~=0 & yM<0  & OthSfc;
+      NorMidOcean = ~Polar & sfcTyp==0 & yM>=0;
+      SouMidOcean = ~Polar & sfcTyp==0 & yM<0;
+      NorPolLand  = NorPolar & sfcTyp~=0;
+      NorPolOcean = NorPolar & sfcTyp==0;
+      SouPolLand  = SouPolar & sfcTyp~=0;
+      SouPolOcean = SouPolar & sfcTyp==0;
+
+      rgnMask =  { Desert, PermIce, NorMidLand,SouMidLand,...
+                   NorMidOcean,SouMidOcean,...
+                   NorPolLand,NorPolOcean,SouPolLand,SouPolOcean };
+
+
+      First = false;
+   end %if isempty(First) || First==true
+
+
+
+
+   %--- Get the MISR monthly aod product. 
+   %    MISR data starting point: 89.75 N, -179.75 W.            
+   %    (MISR has missing vlaues as well.)
+   %
+   monStr = {'JAN','FEB','MAR','APR','MAY','JUN',...
+             'JUL','AUG','SEP','OCT','NOV','DEC'};
+
+   misrLat1 = 89.75;
+   misrLon1 = -179.75;
+   misrDLL  = 0.5;
+
+   yrMon = iyr*100+imon;
+
+   if isempty(crntYrMon) || yrMon ~= crntYrMon
+   
+      yyyy = num2str(iyr, '%04d');
+     if iyr < 2002
+      fptn = [misrAerPath0, 'MISR_AM1_CGAS_',monStr{imon},...
+              '_',yyyy,'*.hdf'];
+      flist = dir(fptn);
+      if length(flist)~=1  disp('--- prep_aerosol(): invalid MISR file name!'); keyboard; end
+      misrFileName = flist.name;
+
+      if ~strcmp(misrFileName(24:26),'F15') disp('--- prep_aerosol(): unknown misr format version!'); keyboard; end
+
+      misrFullName = [misrAerPath0, misrFileName];
+      hdfID = hdfsd('start',misrFullName,'read');
+         odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+         misrAOD = obtain_hdf_datafield(...
+             hdfID, 'Optical depth average', '','doNaN');
+         cd(odir);
+      sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+      misrAOD = squeeze(misrAOD(1,2,1,:,:));  %[NLon,NLat]; All particalType, Green, All optical depth. 
+      else
+      	fptn = [misrAerPath0, 'MISR_AM1_CGAS_',monStr{imon},...
+              '_',yyyy,'*.nc'];
+      	flist = dir(fptn);
+      	if length(flist)~=1  disp('--- prep_aerosol(): invalid MISR file name!'); keyboard; end
+      	misrFileName = flist.name;
+      	if ~strcmp(misrFileName(24:26),'F15') disp('--- prep_aerosol(): unknown misr format version!'); keyboard; end
+      	misrFullName = [misrAerPath0, misrFileName];
+      	misrAODtmp = ncread(misrFullName,'/Aerosol_Parameter_Average/Aerosol_Optical_Depth');
+      	misrAOD = squeeze(misrAODtmp(1,:,:));
+      end % iyr<2017
+      crntYrMon = yrMon;
+   end %if yrMon ~= crntYrMon
+   
+
+
+   %--- fill the missings with the MISR aod product.
+   %
+   misg = isnan(aodM) & ~isnan(latM) & ~isnan(lonM);
+   if any(misg(:))
+
+      latmsg = latM(misg);
+      lonmsg = lonM(misg);
+      lonmsg(lonmsg>180) = lonmsg(lonmsg>180)-360; %-180..180
+   
+      iy = round( (misrLat1-latmsg)./misrDLL ); iy(iy==0)=1;
+      ix = round( (lonmsg-misrLon1)./misrDLL ); ix(ix==0)=1;
+      idx = sub2ind(size(misrAOD), ix,iy);
+
+      aodM(misg) = misrAOD(idx);
+   end
+
+
+   aodM(aodM<0) = NaN;
+
+   aodM(aodM==0) = NaN; %aodM==0 --> NaN
+
+
+
+   %--- Sliding window remove outliers
+   %    boxLen must be odd number!!
+   boxLen = 9;
+   aod1 = colfilt( aodM,[boxLen,boxLen],'sliding',@slidOUTfill );
+   %aod1=aodM;
+
+
+   %--- Sliding window fill missing pixels
+   %    boxLen must be odd number!!
+   boxLen = 5;
+   aod2 = colfilt( aod1,[boxLen,boxLen],'sliding',@slidNaNfill );
+   boxLen = 15;
+   aod2 = colfilt( aod1,[boxLen,boxLen],'sliding',@slidNaNfill );
+
+
+   %-- Fill with regional mean
+   aod3 = aod2;
+   for im = 1:length(rgnMask);
+      msk = rgnMask{im};
+      ta = aod3(msk);
+      ta(isnan(ta)) = exp( nanmean(log(ta)) );
+      aod3(msk)=ta;
+   end
+
+   
+   %-- Still missing filled with land or ocean mean
+   aod4 = aod3;
+   ta = aod4(Land); ta(isnan(ta))=exp(nanmean(log(ta))); aod4(Land)=ta;
+   ta = aod4(Ocean); ta(isnan(ta))=exp(nanmean(log(ta))); aod4(Ocean)=ta;
+   
+   
+   rtnAOD = aod4;
+
+   %--- still missing or invalid value, 
+   %    filled with zonal mean values. 120721:not good idea.
+   %
+   %ms = isnan(aodM);
+   %if any(ms(:))
+   %   %aodM(isnan(aodM)) = nanmedian(nanmedian(aodM)); %exp(nanmean(nanmean( log(aodM) )));
+   %   zM = repmat( nanmean(aodM),[size(aodM,1),1] );
+   %   aodM(ms)=zM(ms); %filled with zonal mean
+   %end
+
+%keyboard
+end %----------------------------------------
+
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function prepare_aerosol_5km( timeV, satV, prepOutPath, saveSRC)
+%----------------------------------------------------------------------
+
+   %yrV  = [2005];
+   %monV = [1,2];
+   %dayV = [];
+   %satV = {'terra','aqua'}; 
+
+   %inPathModisAer = '/data/pkgroup1/xiaolei/WUSA/'; %2005
+   inPathModisAer = '/aosc/ceop/Data/Sat_Data/MODIS/Western_USA/'; %..2010
+   %inPathMisrAer = '/data/ceop4/srb/backup_hwang/Data/misr/';
+   inPathMisrAer = '/aosc/ceop/Data/MISR/';%2005,2009,2010
+
+   resultPath0 = [prepOutPath, 'aerosol/'];
+      
+
+   monStr = {'JAN','FEB','MAR','APR','MAY','JUN',...
+             'JUL','AUG','SEP','OCT','NOV','DEC'};
+             
+
+   %-- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+   
+   
+   %--
+   for isat = 1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      crntYrMon = -1;
+   
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+                    
+         if iyr==2005      
+            hdfPath = [inPathModisAer,'/','S',yyyy,'/',satName,'/aerosol/'];%2005
+         else
+            hdfPath = [inPathModisAer,'/',yyyy,'/'];%2009,2010
+         end
+         nameList = dir([hdfPath,'/',satStr,'04_L2.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = fileName(19:22);
+            %hrmin = str2num(hhmm);
+            
+            disp(fileName)
+      
+            %-- read the MODIS swath aerosol data
+            %
+            fullName = [hdfPath, fileName];
+            hdfID = hdfsd('start',fullName,'read');
+               latM = obtain_hdf_datafield(hdfID, 'Latitude', 'doScl','doNaN'); % (deg,-90..90)
+               lonM = obtain_hdf_datafield(hdfID, 'Longitude', 'doScl','doNaN');% (deg,-180..180)
+               aodM = obtain_hdf_datafield(hdfID, 'Optical_Depth_Land_And_Ocean', 'doScl','doNaN');% (), 10km res.
+               %M = obtain_hdf_datafield(hdfID, 'Quality_Assurance_Land', '','');% (), 10km res.
+               %M = obtain_hdf_datafield(hdfID, 'Quality_Assurance_Ocean', '','');% (), 10km res.
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+
+            %-- read MISR monthly aerosol data to fill the missing
+            %   MISR data starting point: 89.75 N, -179.75 W.            
+            %
+            yrMon = iyr*100+imon;
+            if yrMon ~= crntYrMon
+            
+               fptn = [inPathMisrAer, 'MISR_AM1_CGAS_',monStr{imon},...
+                       '_',yyyy,'*.hdf'];
+               flist = dir(fptn);
+               if length(flist)~=1  disp('--- prep_aerosol(): invalid MISR file name!'); keyboard; end
+               misrFileName = flist.name;
+
+               if ~strcmp(misrFileName(24:26),'F15') disp('--- prep_aerosol(): unknown misr format version!'); keyboard; end
+
+               misrFullName = [inPathMisrAer, misrFileName];
+               hdfID = hdfsd('start',misrFullName,'read');
+                  misrAOD = obtain_hdf_datafield(...
+                            hdfID, 'Optical depth average', '','doNaN');% (), 10km res.
+               sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+               misrAOD = squeeze(misrAOD(1,2,1,:,:));  %[NLon,NLat]; All particalType, Green, All optical depth. 
+
+               crntYrMon = yrMon;
+            end %if yrMon ~= crntYrMon
+            
+
+            %-- fill the missings in aodM
+            %
+            misrLat1 = 89.75;
+            misrLon1 = -179.75;
+            misrDLL  = 0.5;
+
+            misg = isnan(aodM) & ~isnan(latM) & ~isnan(lonM);
+            latmsg = latM(misg);
+            lonmsg = lonM(misg);
+            lonmsg(lonmsg>180) = lonmsg(lonmsg>180)-360; %-180..180
+            
+            iy = round( (misrLat1-latmsg)./misrDLL ); iy(iy==0)=1;
+            ix = round( (lonmsg-misrLon1)./misrDLL ); ix(ix==0)=1;
+            idx = sub2ind(size(misrAOD), ix,iy);
+
+            aodM(misg) = misrAOD(idx);
+
+
+            %-- still missing or invalid value, filled with average.
+            %
+            aodM(aodM<0) = NaN;
+            aodM(isnan(aodM)) = nanmedian(nanmedian(aodM)); %exp(nanmean(nanmean( log(aodM) )));
+   
+
+%keyboard
+%return
+            %-- output the prepared aerosol data
+            %
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'aer.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(aodM), 'int32');
+               fwrite(fid, size(aodM),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, aodM, 'float32');
+            fclose(fid);
+
+               
+         end %--for ifl = 1:numFiles
+      
+      end %--for atv=timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+
+
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%---------------------------------------------------------------------
+function [ds,varargout] = obtain_hdf_datafield_swathaerosol(...
+                             hdfID, dataName, toFloat)
+%---------------------------------------------------------------------
+%-- 120219: Dont use HDF-EOS interface, it needs a seperate HDF view to
+%   read attributes that is local to data field. Use directly the HDF
+%   interface is simple and enough for my current application.
+%   4 ways to read a HDFEOS file
+%     1-- hdftool 
+%     2-- hdfread !the high-level Matlab function. no way to read attributes.
+%     3-- hdfeos low-level functions !need seperate HDF view to read attributres.
+%     4-- hdf low-level functions !may be complicated for some HDFEOS files.
+
+   %[nData,nGlbAttr,sts]=hdfsd('fileinfo',fid);
+   %for ip = 1:length(paraNames)
+      %pName = paraNames{ip};
+
+      dsIdx = hdfsd( 'nametoindex', hdfID, dataName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', hdfID, dsIdx );
+      [dsname, dsndims, dsdims, dstype, dsatts, sts] =...
+                                            hdfsd( 'getinfo', dsHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_swathaerosol(): sts~=0!'); keyboard; end
+
+
+      %dsndims  = 2;
+      %dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, sts] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+      if sts~=0 disp('---obtain_hdf_datafield_swathaerosol(): sts~=0!'); keyboard; end
+
+
+      attHdl       = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+      [sclfac,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_swathaserosol(): sts~=0!'); keyboard; end
+      
+      attHdl       = hdfsd( 'findattr', dsHdl, 'add_offset' );
+      [offset,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_swathaserosol(): sts~=0!'); keyboard; end
+      
+      attHdl       = hdfsd( 'findattr', dsHdl, '_FillValue' );
+      [misval,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_swathaerosol(): sts~=0!'); keyboard; end
+
+
+      %-- Matlab integer type CAN NOT be set to NaN! 
+      %   but ds==misval is OK, although misval is a int16 integer.
+      if toFloat
+         ds = double(ds);
+         ds(ds==misval) =NaN;
+         ds = sclfac*(ds-offset);
+      end
+      
+
+      sts = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+      
+      varargout{1} = dsdims;
+
+   %end %--for ip = 1:length(paraNames)
+
+%keyboard
+   
+%{
+   %Open swath
+   swathID = hdfsw('attach', hdfID, swathName);
+
+   %Reading Data from a Data Field
+   %dataName='Retrieved_Moisture_Profile';
+
+   [data, sts] = hdfsw('readfield', swathID, dataName, [], [], []);
+   
+   %Reading lat and lon data
+   %[lon, status] = hdfsw('readfield', swathID, 'Longitude', [], [], []);
+   %[lat, status] = hdfsw('readfield', swathID, 'Latitude', [], [], []);
+
+   %Detaching from the Swath Object
+   hdfsw('detach', swathID);
+
+   
+   %Convert the data to double type for plot
+   %data=double(data);
+   %lon=double(lon);
+   %lat=double(lat);
+
+   %Reading attributes from the data field
+   %dataName='Retrieved_Moisture_Profile';
+
+   sds_index = hdfsd('nametoindex', SD_id, dataName);
+   sds_id = hdfsd('select',SD_id, sds_index);
+
+
+   %Reading filledValue from the data field
+   fillvalue_index = hdfsd('findattr', sds_id, '_FillValue');
+   [fillvalue, status] = hdfsd('readattr',sds_id, fillvalue_index);
+
+   %Reading units from the data field
+   units_index = hdfsd('findattr', sds_id, 'units');
+   [units, status] = hdfsd('readattr',sds_id, units_index);
+
+   %Reading scale_factor from the data field
+   scale_index = hdfsd('findattr', sds_id, 'scale_factor');
+   [scale, status] = hdfsd('readattr',sds_id, scale_index);
+
+   %Reading add_offset from the data field
+   offset_index = hdfsd('findattr', sds_id, 'add_offset');
+   [offset, status] = hdfsd('readattr',sds_id, offset_index);
+
+   %Terminate access to the corresponding data set
+   hdfsd('endaccess', sds_id);
+%}
+
+end
+
+
+%---------------------------------------------------------------------
+function [ds,varargout] = obtain_hdf_datafield_misrAerosol(...
+                             hdfID, dataName)
+%---------------------------------------------------------------------
+%-- 120219: Dont use HDF-EOS interface, it needs a seperate HDF view to
+%   read attributes that is local to data field. Use directly the HDF
+%   interface is simple and enough for my current application.
+%   4 ways to read a HDFEOS file
+%     1-- hdftool 
+%     2-- hdfread !the high-level Matlab function. no way to read attributes.
+%     3-- hdfeos low-level functions !need seperate HDF view to read attributres.
+%     4-- hdf low-level functions !may be complicated for some HDFEOS files.
+
+   %[nData,nGlbAttr,sts]=hdfsd('fileinfo',fid);
+   %for ip = 1:length(paraNames)
+      %pName = paraNames{ip};
+
+      dsIdx = hdfsd( 'nametoindex', hdfID, dataName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', hdfID, dsIdx );
+      [dsname, dsndims, dsdims, dstype, dsatts, sts] =...
+                                            hdfsd( 'getinfo', dsHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_misrAerosol(): sts~=0!'); keyboard; end
+
+
+      %dsndims  = 2;
+      %dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, sts] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+      if sts~=0 disp('---obtain_hdf_datafield_misrAerosol(): sts~=0!'); keyboard; end
+
+
+      %attHdl       = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+      %[sclfac,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      %if sts~=0 disp('---obtain_hdf_datafield_misrAserosol(): sts~=0!'); keyboard; end
+      %
+      %attHdl       = hdfsd( 'findattr', dsHdl, 'add_offset' );
+      %[offset,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      %if sts~=0 disp('---obtain_hdf_datafield_misrAserosol(): sts~=0!'); keyboard; end
+      
+      attHdl       = hdfsd( 'findattr', dsHdl, '_FillValue' );
+      [misval,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_misrAerosol(): sts~=0!'); keyboard; end
+
+
+      %-- Matlab integer type CAN NOT be set to NaN! 
+      %   but ds==misval is OK, although misval is a int16 integer.
+      %if toFloat
+      %   ds = double(ds);
+      %   ds(ds==misval) =NaN;
+      %   ds = sclfac*(ds-offset);
+      %end
+
+      ds(ds==misval) =NaN;
+      
+
+      sts = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+      
+      varargout{1} = dsdims;
+
+   %end %--for ip = 1:length(paraNames)
+
+
+end
+
+
+
+
+
+

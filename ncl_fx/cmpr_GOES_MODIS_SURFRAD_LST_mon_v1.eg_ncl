@@ -1,0 +1,527 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "/data/srb1/wchen/tools/ncl_fx/substring.ncl"
+load "/data/srb1/wchen/tools/ncl_fx/addmeta.ncl"
+;---------------------------------------;
+; Box Plot for LST comparisions         ;
+; For values and multi-year average only;
+;---------------------------------------;
+begin
+;*******************************
+; specification and data put in 
+;******************************* 
+   statstr = "values"  
+   pltkey  = "average"   
+   goesSat = "W"
+   dynt    = "Allday"
+   iSt = 0
+   
+   yrstr = 2004  
+   yrend = 2009
+   
+   nyr   = toint(yrend-yrstr+1)
+   
+   nmon = 12
+   nhrs = 24 
+   nstd        = 1.5
+   if dynt.eq."day" then
+    hstrt=15
+    hend = 20
+    else if dynt.eq."night"then
+    hstrt = 4
+    hend  = 6
+    else
+    hstrt =0
+    hend  = 23
+    end if
+   end if
+  
+   fpath="/data/srb3/wchen/Satellite/MODIS/monthly/MOD11C3/"
+  ;filename=fpath+"MOD11C3.A2004001.006.2015213011324.hdf"
+   
+   Res=0.05
+        
+
+    dimNames=(/"lat","lon"/)
+    geoinfo=(/-89.5,89.5,-179.5,179.5/)
+   ;geoinfo=(/-90,90,-180,180/)
+    longname="Monthly daytime 3min CMG Land-surface Temperature"
+    
+    stpth   = "/data/srb2/wchen/LST/SURFRAD_obtained/"
+    StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    stid  = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+    
+    
+    MODFlag  = True
+    
+    pltpth   = "./figs/"
+    BoxPlt   = True
+
+    wkstype  = "eps";"x11"
+    
+ 
+    
+    time    = yyyymmdd_time(yrstr,yrend,"integer")
+    year    = time/10000
+    mmdd    = time-year*10000
+    mm      = mmdd/100
+    dd      = mmdd-mm*100    
+    ndays   = dimsizes(time)
+     print(year(0)+" "+ mm(0)+ " "+dd(0))
+     print(year(ndays-1)+" "+ mm(ndays-1)+ " "+dd(ndays-1))
+     delete(time)
+     delete(mmdd)     
+     
+     
+
+     stmulti   = new((/ndays,nhrs/),"float",0)
+     eastmulti = new((/ndays,nhrs/),"float",0)
+     westmulti = new((/ndays,nhrs/),"float",0)
+     modis_st  = new((/nyr,nmon/),"float",0) 
+
+     
+     stat_st   = new((/nmon,6/),"float")
+     stat_east = new((/nmon,6/),"float")
+     stat_west = new((/nmon,6/),"float")
+     stat_plt  = new((/nmon*2,5/),"float")
+   ;==== Start  loop
+
+   wksname  = yrstr+"-"+yrend+"_MODIS_RTTOV_LST_vs_SURFRAD_"+str_upper(stid(iSt))+"_"+dynt+\
+                "_"+statstr+"_"+pltkey+"_"+goesSat    
+     do yr = yrstr,yrend 
+        iyr  = yr-yrstr
+        
+        inds = ind(year.eq.yr)       
+        nday = dimsizes(inds) 
+        print("inds "+inds(0)+" "+inds(nday-1))
+        
+        stdata   = new((/nday,nhrs/),"float",0)
+        eastdata = new((/nday,nhrs/),"float",0)
+        westdata = new((/nday,nhrs/),"float",0)
+        
+        ;for extracting data of each year 
+        ;the size of submm equal the days of the year
+        ;to make leap year easier to be processed                   
+        print("***** read in ST data *****")     
+        stfname = yr+"_LST_SURFRAD_"+str_upper(stid(iSt))    
+        stdata  = fbindirread(stpth+stfname+"_"+dynt+".dat",0,(/nday,nhrs/),"float")
+        stdata  = where(stdata.gt.0,stdata,0)
+        stdata@_FillValue=0
+        printVarSummary(stdata)
+        printMinMax(stdata,True)
+       ;print(stdata(1,:))      
+      
+        print("***** read in EST data *****")  
+        ;e.g. 2004_GOES_W_RTTOV_LST_SURFRAD_DRA_Allday.dat
+        eastfname = yr+"_GOES_E_RTTOV_LST_SURFRAD_"+str_upper(stid(iSt))+"_Allday.dat"
+        eastdata  = fbindirread(stpth+eastfname,0,(/nday,nhrs/),"float")              
+        eastdata  = where(eastdata.gt.220,eastdata,0)
+        eastdata@_FillValue = 0 
+        printVarSummary(eastdata)
+        printMinMax(eastdata,True)
+
+        westfname = yr+"_GOES_W_RTTOV_LST_SURFRAD_"+str_upper(stid(iSt))+"_Allday.dat"
+        westdata  = fbindirread(stpth+westfname,0,(/nday,nhrs/),"float")
+        westdata  = where(westdata.gt.220,westdata,0)
+        westdata@_FillValue = 0             
+        printVarSummary(westdata)
+        printMinMax(westdata,True) 
+        
+       ;eastdata  = where(ismissing(westdata),0,eastdata)
+       ;westdata  = where(ismissing(eastdata),0,westdata)
+       ;print(eastdata(1,:))                     
+       ;print(westdata(1,:))
+       ;test=estdata-stdata
+       ;printMinMax(test,True)
+       ;printVarSummary(test)
+              
+        stmulti(inds,:)      = stdata       
+        eastmulti(inds,:)    = eastdata  
+        westmulti(inds,:)    = westdata  
+             
+if MODFlag then
+        print("***** read in MODIS data *****")
+        fils = systemfunc ("ls "+fpath+"MOD11C3.A"+yr+"*.hdf") ; file paths
+       ;print(fils)
+        nfls = dimsizes(fils)
+    if nfls.eq.nmon then
+    do ifl=0,nmon-1
+        filename=fils(ifl)
+        print(filename)    
+        setfileoption("hdf", "FileStructure", "Advanced")
+        f = addfile(filename, "r")
+       ;print(f)        
+        lstd = short2flt(f->LST_Day_CMG)
+        if dynt.eq."night" then
+            lstn = short2flt(f->LST_Night_CMG) 
+            lstd = (/lstn/)
+        end if
+        if dynt.eq."Allday" then
+            lstn = short2flt(f->LST_Night_CMG) 
+            lstd = (/(lstd+lstn)/2./)
+            ;printMinMax(lstn,True)       
+        end if
+       ;printVarSummary(lstd) 
+        printMinMax(lstd,True)
+
+       ;qcd  = getbitsone(f->QC_Day)
+       ;printVarSummary(qcd)
+       ;dvt  = f->Day_view_time
+       ;printVarSummary(dvt)
+        ;  qcd!0 = "lat"
+        ; qcd!1 = "lon"     
+        dimsz=dimsizes(lstd)
+        lstd=lstd(::-1,:)
+        lstd= addmeta(lstd,dimsz,dimNames,geoinfo,longname,lstd@units,-1,-1)
+       ;printVarSummary(lstd)
+       ;printMinMax(lstd,True)
+        Lat=lstd&lat
+        Lon=lstd&lon
+        indlat  = ind(Lat.ge.StLat(iSt)-Res.and.Lat.le.StLat(iSt)+Res)
+        indlon  = ind(Lon.ge.StLon(iSt)-Res.and.Lon.le.StLon(iSt)+Res)
+        if (.not.all(ismissing(indlat)) ).and.(.not.all(ismissing(indlon))) then
+            ;print(Lat(indlat))
+            ;print(Lon(indlon))
+            ;print(qcd(indlat,indlon,:))
+            ;print(dvt(indlat,indlon))
+            tmp = new((/dimsizes(indlat),dimsizes(indlon)/),typeof(lstd),0)
+            print("extract data")
+            do itlat = 0,dimsizes(indlat)-1
+            do itlon = 0,dimsizes(indlon)-1
+                tmp(itlat,itlon)=lstd(indlat(itlat),indlon(itlon))
+            end do ;do itlon
+            end do  ;do itlat
+            if (dimsizes(indlat).gt.1).or.(dimsizes(indlon).gt.1) then
+                rad         = 4.0*atan(1.0)/180.0
+                wgty        = cos(Lat(indlat)*rad)
+                temp        = wgt_areaave_Wrap(tmp,wgty,1.0,0)
+                delete(wgty)
+                delete(tmp)
+                tmp         = temp
+                delete(temp)
+            end if ;dimsizes(indlat)
+            modis_st(iyr,ifl)=tmp
+            delete(tmp)
+           ;print(modis_st(iyr,ifl))
+         else
+                print("Can not find grid near Site")
+                exit
+         end if ;if (.not.all(ismissing(indlat)) )
+         delete(indlat)
+         delete(indlon)
+         delete(lstd)
+     end do ;ifl
+     else
+         print("MODIS data of "+ yr + "has missing files")
+         exit
+    end if;nfls 
+    end if;MODFlag  
+        delete(inds)
+        delete(stdata)
+        delete(eastdata)
+        delete(westdata)
+  end do ;iyr 
+  printVarSummary(stmulti)
+  printMinMax(stmulti,True)
+  printVarSummary(eastmulti)
+  printMinMax(eastmulti,True)
+  printVarSummary(westmulti)
+  printMinMax(westmulti,True)  
+  printVarSummary(modis_st)
+  printMinMax(modis_st,True)
+   
+;===== compare
+    print("comparing multi-year averages")
+    iplt=0  
+    do imon = 1,nmon;7,7;
+       ;print(imon)
+        indmn   = ind(mm.eq.imon)
+       ;print(dimsizes(indmn))
+        ;print(mm(indmn(0)))
+     
+        stdata     = stmulti(indmn,:)
+        eastdata   = eastmulti(indmn,:) 
+        westdata   = westmulti(indmn,:)
+       ;print("before")
+       ;print(stdata+"    "+eastdata+"    "+westdata)  
+                             
+         diffeast    = eastdata-stdata        
+         stdeast     = stddev(diffeast)
+        
+         diffwest    = westdata-stdata
+         stdwest     = stddev(diffwest)
+       
+         diffmodis   = new(dimsizes(stdata),"float",0)
+         if dynt.eq."Allday" then
+             diffmodis(:,4:6)      = avg(modis_st(:,imon-1))-stdata(:,4:6)
+             diffmodis(:,17:19)      = avg(modis_st(:,imon-1))-stdata(:,17:19)
+         else
+            diffmodis(:,hstrt:hend)   = avg(modis_st(:,imon-1))-stdata(:,hstrt:hend)
+         end if
+         diffmodis@_FillValue = 0
+         
+         print(diffmodis)
+         print(stddev(diffmodis))
+        ;exit
+        print("stddev")
+        print(stdeast+"    "+stdwest+"    "+((stdeast+stdwest)/2.))
+       ;print(diffeast+"   "+diffwest)
+
+        eastdata     = where((abs(diffeast).gt.nstd*stdeast),0,eastdata)
+        westdata     = where((abs(diffwest).gt.nstd*stdwest),0,westdata)
+        stdata       = where(ismissing(eastdata).or.ismissing(westdata),0,stdata)
+        eastdata     = where(ismissing(stdata),0,eastdata)
+        westdata     = where(ismissing(stdata),0,westdata)
+        
+        diffeast     = eastdata-stdata
+        diffwest     = westdata-stdata 
+        
+        
+       ;print("after")   
+       ;print(stdata+"    "+eastdata+"    "+westdata) 
+       ;print((eastdata-stdata)+"    "+(westdata-stdata)) 
+
+        stats   = stat_dispersion(stdata,False)
+        stat_st(imon-1,5)=avg(stdata(:,hstrt:hend));stats(0)                       
+        stat_st(imon-1,0)=stats(2)
+        stat_st(imon-1,1)=stats(6)
+        stat_st(imon-1,2)=stats(0);~MEAN;
+       if dynt.eq."Allday" then
+            stat_st(imon-1,2)=stats(8);~median;
+       end if
+        stat_st(imon-1,3)=stats(10)
+        stat_st(imon-1,4)=stats(14) 
+
+       ;print(stats(1))       
+        delete(stats)
+        
+        stats   = stat_dispersion(eastdata,False)
+        stat_east(imon-1,5)=avg(eastdata(:,hstrt:hend));stats(0)                  
+        stat_east(imon-1,0)=stats(2)
+        stat_east(imon-1,1)=stats(6)
+        stat_east(imon-1,2)=stats(0)
+        if dynt.eq."Allday" then
+            stat_east(imon-1,2)=stats(8)
+       end if
+        stat_east(imon-1,3)=stats(10)
+        stat_east(imon-1,4)=stats(14)
+
+       ;print(stats(1))                   
+        delete(stats)
+
+        stats   = stat_dispersion(westdata,False) 
+        stat_west(imon-1,5)=avg(westdata(:,hstrt:hend));stats(0) 
+        stat_west(imon-1,0)=stats(2)
+        stat_west(imon-1,1)=stats(6)
+        stat_west(imon-1,2)=stats(0)
+        if dynt.eq."Allday" then
+            stat_west(imon-1,2)=stats(8)
+       end if
+        stat_west(imon-1,3)=stats(10)
+        stat_west(imon-1,4)=stats(14) 
+
+       ;print(stats(1))                   
+        delete(stats)
+   
+        stat_plt(iplt,:) = stat_st(imon-1,0:4)
+        iplt = iplt+1
+        if goesSat.eq. "E" then
+            stat_plt(iplt,:) = stat_east(imon-1,0:4)
+        else
+            stat_plt(iplt,:) = stat_west(imon-1,0:4)
+        end if;goesSat
+        iplt = iplt+1
+        
+        stmulti_aft   = stmulti        
+        eastmulti_aft = eastmulti
+        westmulti_aft = westmulti
+        
+        stmulti_aft   = 0
+        eastmulti_aft = 0
+        westmulti_aft = 0
+        
+        stmulti_aft(indmn,:)   = stdata
+        eastmulti_aft(indmn,:) = eastdata
+        westmulti_aft(indmn,:) = westdata
+        
+        diffeast_multi          = eastmulti
+        diffwest_multi          = westmulti
+ 
+        diffeast_multi          = 0
+        diffwest_multi          = 0  
+ 
+        diffeast_multi(indmn,:) = diffeast
+        diffwest_multi(indmn,:) = diffwest
+
+        
+        delete(indmn)
+        delete(stdata)
+        delete(eastdata)
+        delete(westdata)
+        delete(diffeast)
+        delete(diffwest)
+        delete(diffmodis)
+    end do ;imon
+    print(avg(stat_st(:,5)))  
+    print(avg(stat_east(:,5)))  
+    print(avg(stat_west(:,5)))
+    print(avg(modis_st))
+  
+    print(stat_st(:,5)+"    "+stat_east(:,5)+"    "+stat_west(:,5)+"    "+modis_st(0,:))
+    
+    if BoxPlt then  
+       print("Box Plotting") 
+            boxdata    = stat_plt
+           ;printVarSummary(boxdata)
+           ;print(boxdata)
+
+            markerval1 = stat_st(:,5)
+            markerval3 = dim_avg_n_Wrap(modis_st,0)            
+            txt1       = "mean = "+sprintf("%.2f",avg(modis_st))
+            txt2       = "mean = "+sprintf("%.2f",avg(stat_st(:,5)))
+            txt4       = "mean = "+sprintf("%.2f",avg(stat_st(:,2)))
+        if goesSat.eq."E" then
+            markerval2 = stat_east(:,5)         
+            txt3       = "mean = "+sprintf("%.2f",avg(stat_east(:,5)))
+            txt5       = "mean = "+sprintf("%.2f",avg(stat_east(:,2)))
+        else
+            markerval2 = stat_west(:,5)
+            txt3       = "mean = "+sprintf("%.2f",avg(stat_west(:,5)))
+            txt5       = "mean = "+sprintf("%.2f",avg(stat_west(:,2)))
+        end if; goesSat     
+            dimsz=dimsizes(boxdata)
+            sz0=dimsz(0)
+            x = ispan(1,sz0,1) 
+         
+            color = (/"red","blue"/)
+            boxcolor = new((/sz0/2,2/),"string")
+            boxcolor = conform(boxcolor,color,1)
+            ;print(boxcolor)
+        
+            timestr  = (/"","JAN"," "," "," "," "," ","APR"," "," "," "," ",\
+                                " ","JUL"," "," "," "," "," ","OCT"," "," "," "," "/)
+            timestrs = new((/sz0/(nmon*2),(nmon*2)/),"string")
+            timestrs = conform(timestrs,timestr,1)
+            tmXBLabels = new(sz0+2,"string")
+            tmXBLabels(1:sz0)=ndtooned(timestrs)
+            tmXBLabels(0)= " "
+            tmXBLabels(sz0+1)= " "
+            print(tmXBLabels)
+        
+            wks = gsn_open_wks(wkstype,pltpth+"box_"+wksname)
+            res                 = True 
+            ;res@gsnDraw	    = False		 
+            ;res@gsnFrame		= False
+            ;res@tmXBMode        = "Manual";"Explicit"
+            res@tmXBTickSpacingF= 2
+            res@tmXBMinorOn     = False 	   
+                   
+       
+             res@trYMinF         = 260.0                 
+             res@trYMaxF         = 340.0          
+            ;res@tmYLMode        = "Manual"	    
+            ;res@tmYLTickStartF  = res@trYMinF   
+            ;res@tmYLTickEndF    = res@trYMaxF   
+            ;res@tmYLTickSpacingF= 1             
+            res@tmYLMinorOn     = False 
+            res@tmXBLabelFontHeightF = 0.014              
+
+            llres                   = True      
+            llres@gsLineThicknessF  = 2.5       
+
+            opti           = True  
+            opti@boxWidth  = 0.35             
+            opti@boxColors = ndtooned(boxcolor)
+      
+            res@tiMainString    = dynt+" LST Distribution at SURFRAD_"+str_upper(stid(iSt))
+            res@tiYAxisString   = "Temperature (K)"
+      
+            plot=boxplot(wks,x,boxdata,opti,res,llres) 
+            getvalues plot
+                ;"tmXBValues"             : tmXBValues
+                ;"tmYLValues"             : tmYLValues
+                "tmYLLabelFontHeightF"   : fheight
+                "tmYLValues"             : yvalues          
+            end getvalues
+            setvalues plot
+                "tmXBLabels":tmXBLabels             
+            end setvalues 
+            ;print(yvalues)
+            nyval=dimsizes(yvalues)
+            lgres                    = True
+            lgres@lgLineColors       = (/"red","blue"/)     
+            lgres@vpWidthF           = 0.20                   
+            lgres@vpHeightF          = 0.1                   
+            lgres@lgPerimOn          = False                 
+            lgres@lgDashIndexes      = (/0,0/)              
+            lgres@lgLineLabelStrings = (/"",""/) 
+            lgres@lgLabelFontHeightF = 0.055
+            lgres@lgLabelFontThicknessF=3.
+        
+            gsn_legend_ndc(wks,2,(/"SURFRAD  ","GOES-"+goesSat+"_RTTOV  "/),0.8,0.725,lgres) 
+            gsn_legend_ndc(wks,2,(/txt4,txt5/),0.8,0.5,lgres) 
+       
+        ;-- polymarker resources
+        pmres                        =  True
+        
+        pmres@gsMarkerSizeF          =  0.0125        ;-- set size of marker
+        pmres@gsLineThicknessF       =  3.          ;-- marker line thickness
+        pmres@gsMarkerIndex          =  NhlNewMarker(wks, "z", 35, 0.0, 0.0, 1., 1., 0.0)
+        
+        txres               = True
+        txres@txFontHeightF = 0.0125
+        txres@txJust        = "CenterLeft";"BottomLeft"
+
+             
+           ; polymk= gsn_add_polymarker(wks, plot, 23, yvalues(nyval-1), pmres)
+           ; txt   = gsn_add_text(wks,plot,"MOD11C3v6",23.5,yvalues(nyval-1),txres)
+         do ipm = 1,dimsizes(markerval1)
+             pmres@gsMarkerColor          = "red"       
+             plot@$unique_string("dum")$ =gsn_add_polymarker(wks, plot, (ipm-1)*2+1.5, markerval3(ipm-1), pmres)
+             pmres@gsMarkerColor          = "orange"
+             plot@$unique_string("dumst")$ =gsn_add_polymarker(wks, plot, (ipm-1)*2+1.5, markerval1(ipm-1), pmres)
+             pmres@gsMarkerColor          = "blue"
+             plot@$unique_string("dumest")$ =gsn_add_polymarker(wks, plot, (ipm-1)*2+1.5, markerval2(ipm-1), pmres)
+         end do
+         
+         pmres@gsMarkerColor          = "red"   
+         gsn_polymarker_ndc(wks,0.825,0.6,pmres)
+         gsn_text_ndc(wks,"MOD11C3v6  ",0.85,0.6,txres)         
+         gsn_polymarker_ndc(wks,0.825,0.375,pmres)
+         gsn_text_ndc(wks,txt1,0.85,0.375,txres)
+         
+         pmres@gsMarkerColor          = "orange"
+         gsn_polymarker_ndc(wks,0.825,0.575,pmres)
+         gsn_text_ndc(wks,"SURFRAD  ",0.85,0.575,txres)         
+         gsn_polymarker_ndc(wks,0.825,0.35,pmres)
+         gsn_text_ndc(wks,txt2,0.85,0.35,txres)
+         
+         pmres@gsMarkerColor          = "blue"
+         gsn_polymarker_ndc(wks,0.825,0.55,pmres)
+         gsn_text_ndc(wks,"GOES-"+goesSat+"_RTTOV  ",0.85,0.55,txres)
+         gsn_polymarker_ndc(wks,0.825,0.325,pmres)
+         gsn_text_ndc(wks,txt3,0.85,0.325,txres)
+         draw(plot)
+         frame(wks)         
+    end if;BoxPlt
+    
+   
+    
+    
+end
+        ; print(stats(0)+" "+stats(2)+" "+stats(6)+" "+stats(10)+" "+stats(14))
+        ; print("std="+stats(1)) 
+        ;diff    = stdata-stat_st(imon-1,2)
+        ;stats   = stat_dispersion(diff,False) 
+        ;stdst   = stats(1)
+        ;delete(diff)
+        ;eastdata     = where((abs(diffeast).gt.nstd*stdeast).and.(abs(diffwest).gt.nstd*stdwest),0,eastdata)
+       ;westdata     = where((abs(diffwest).gt.nstd*stdwest).and.(abs(diffeast).gt.nstd*stdeast),0,westdata)
+       ;stdata       = where((abs(diffeast).gt.nstd*stdeast).and.(abs(diffwest).gt.nstd*stdwest),0,stdata)
+       
+       ;stdata     = stmulti(indmn,hstrt:hend);12:21
+        ;eastdata   = eastmulti(indmn,hstrt:hend) 
+        ;westdata   = westmulti(indmn,hstrt:hend)

@@ -1,0 +1,52 @@
+
+
+
+%----------------------------------------------------------------------
+function  [sfc, sfcTypRes, sfcTypLat1, sfcTypLon1] = ...
+                            read_surface_type_1deg( inPathSfcTyp )
+%----------------------------------------------------------------------
+
+   %--- IGBP_Land_Cover_Type                        'landmask_1deg.dat'
+   %   0  water = 0
+   %   1  evergreen needleleaf forest ............ 1. Evrgrn. Needle For.
+   %   2  evergreen broadleaf forest ............. 2. Evrgrn. Broad For.
+   %   3  deciduous needleleaf forest ............ 3. Decid. Needle For.
+   %   4  deciduous broadleaf forest ............. 4. Decid. Broad For. 
+   %   5  mixed forests .......................... 5. Mixed Forest 
+   %   6  closed shrubland ....................... 6. Closed Shrubs    
+   %   7  open shrublands ........................ 7. Open Shrubs 
+   %   8  woody savannas ......................... 8. Woody Savannas 
+   %   9  savannas ............................... 9. Savannas 
+   %   10 grasslands ............................. 10. Grassland 
+   %   11 permanent wetlands ..................... 11. Wetlands 
+   %   12 croplands .............................. 12. Crops
+   %   13 urban and built-up ..................... 13. Urban 
+   %   14 cropland/natural vegetation mosaic ..... 14. Crop/Mosaic 
+   %   15 snow and ice ........................... 15. Snow/Ice 
+   %   16 barren or sparsely vegetated ........... 16. Barren/Desert 
+   %   17 unclassified = -2                        17. Water 
+   %                                               18. Tundra  
+
+   
+   sfcTypRes  = 1; % 1deg sfc type data.
+   sfcTypLat1 = 90-sfcTypRes/2;  %90..-90
+   sfcTypLon1 = -180+sfcTypRes/2; %-180..180
+   sfcNLats = 180;
+   sfcNLons = 360;
+   
+   fullName = [inPathSfcTyp,'/','landmask_1.0deg.dat'];
+
+   dM = load(fullName);
+   %lat = dM(:,1); lat=reshape(lat,[sfcNLons,sfcNLats]); lat=fliplr(lat);
+   %lon = dM(:,2); lon=reshape(lon,[sfcNLons,sfcNLats]); lon=fliplr(lon);
+   sfc = dM(:,3); sfc=reshape(sfc,[sfcNLons,sfcNLats]); sfc=fliplr(sfc);
+
+   %--- Change "landmask_1.0deg.dat" classes to "IGBP_Land_Cover_Type"
+   sfc(sfc==17) =0; 
+   sfc(sfc==18) =16;
+
+
+%keyboard
+end 
+
+

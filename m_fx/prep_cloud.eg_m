@@ -1,0 +1,969 @@
+%----------------------------------------------------------------------
+function jumpin(timeV, satV, prepOutPath,saveSRC, gridRes)
+%----------------------------------------------------------------------
+
+   if gridRes == 1.0
+
+      prepare_cloud_1deg( timeV, satV, prepOutPath,saveSRC )
+
+   elseif gridRes == 0.05
+
+      prepare_cloud_5km( timeV, satV, prepOutPath,saveSRC )
+   
+   end
+   
+end
+
+
+%----------------------------------------------------------------------
+function prepare_cloud_1deg( timeV, satV, prepOutPath,saveSRC )
+%----------------------------------------------------------------------
+%==========================================================================   
+   resultPath0 = [prepOutPath, 'cloud/'];
+
+   %inPathModisCld = '/data/pkgroup1/xiaolei/WUSA/';
+   %inPathModisCld = '/aosc/helios2/ytma/data_helios2/sat/MODIS/Level3/L3raw/';
+   %inPathModisCld = '/aosc/ceop/Data/Sat_Data/MODIS/'; %2003..2007, 2008..2012;
+   %inPathModisCld = '/data/crash/wchen/MODIS/ShortWave/Input/Sat_Data/collection51/'; % from 2002-2014 contains symbol links
+	inPathModisCld = '/data/srb8/wchen/LW/modis_hdf/';%2012-2019
+%==========================================================================
+   
+   %---
+   paramC = {...
+              'cldTop',   'Cloud_Top_Pressure_Day_Mean';...
+              'watOpd',   'Cloud_Optical_Thickness_Liquid_Log_Mean';...
+              'iceOpd',   'Cloud_Optical_Thickness_Ice_Log_Mean';...
+              'othOpd',   'Cloud_Optical_Thickness_Undetermined_Log_Mean';...
+              'watRe' ,   'Cloud_Effective_Radius_Liquid_Mean'; ...
+              'iceRe' ,   'Cloud_Effective_Radius_Ice_Mean'; ...
+              'othRe' ,   'Cloud_Effective_Radius_Undetermined_Mean'; ...
+              'watFrc',   'Cloud_Retrieval_Fraction_Liquid'; ... %0..1Retrieval
+              'iceFrc',   'Cloud_Retrieval_Fraction_Ice'; ...    %0..1
+              'othFrc',   'Cloud_Retrieval_Fraction_Undetermined'; ... %0..1
+              'totFrc',   'Cloud_Retrieval_Fraction_Combined';...      %0..1
+            };
+   
+   
+   %--- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+   for isat =1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+%========================================================================== 
+%{                   
+         if ismember(iyr,[2003:2005,2007])
+            hdfPath = [inPathModisCld,'/',yyyy,'/1_deg/'];%2003..2007
+         elseif ismember(iyr,[2006,2008:2013])
+            hdfPath = [inPathModisCld,'/',yyyy,'/']; %2009,2010
+         end
+%}
+            hdfPath = [inPathModisCld,'/',yyyy,'/'];
+%==========================================================================
+         nameList = dir([hdfPath,'/',satStr,'08_D3.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = '9999';%fileName(19:22);
+            %hrmin = str2num(hhmm);
+
+            %disp(sprintf('--- %s(): %04d/%02d/%02d-%s',mfilename,iyr,imon,idy,hhmm))
+            disp(['prep cloud... ',fileName])
+      
+            %-- read the MODIS swath cloud data
+            %
+            fullName = [hdfPath, fileName];
+            datC = cell( size(paramC,1), 1);
+            hdfID = hdfsd('start',fullName,'read');
+
+               odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+               for ip = 1:size(paramC,1)
+                  datC{ip} = obtain_hdf_datafield(...
+                           hdfID, paramC{ip,2}, 'doScl','doNaN');
+               end
+               cd(odir);
+   
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+
+            ctop = datC{ find( strcmp('cldTop', paramC(:,1)) ) };
+            wcod = datC{ find( strcmp('watOpd', paramC(:,1)) ) };
+            icod = datC{ find( strcmp('iceOpd', paramC(:,1)) ) };
+            ocod = datC{ find( strcmp('othOpd', paramC(:,1)) ) };
+            wcre = datC{ find( strcmp('watRe' , paramC(:,1)) ) };
+            icre = datC{ find( strcmp('iceRe' , paramC(:,1)) ) };
+            ocre = datC{ find( strcmp('othRe' , paramC(:,1)) ) };
+            wfrc = datC{ find( strcmp('watFrc', paramC(:,1)) ) };%0..1
+            ifrc = datC{ find( strcmp('iceFrc', paramC(:,1)) ) };%0..1
+            ofrc = datC{ find( strcmp('othFrc', paramC(:,1)) ) };%0..1
+            tfrc = datC{ find( strcmp('totFrc', paramC(:,1)) ) };%0..1
+         
+            latM = repmat( [89.5:-1:-89.5], [size(wfrc,1),1] );
+            lonM = repmat( [-179.5:1:179.5]', [1,size(wfrc,2)] );
+
+
+            %-- Some data are logarithmic, convert them.
+            wcod = 10.^wcod;
+            icod = 10.^icod;
+            ocod = 10.^ocod;
+
+            %-- invalid lat and lon values set to NaN, 5km version.
+            %latM(latM<-100)=NaN;
+            %lonM(lonM<-200)=NaN;
+            
+
+            %-- Cloud phasing
+            %   cloud frction =0..1
+            %[wfrc,wcod,wcre, ifrc,icod,icre] =...
+            %      cloudPhasing(qltM, latM, lonM, codM, creM);
+
+
+            %-- Do cloud qulity control
+            [wfrc,wcod,wcre,...
+             ifrc,icod,icre,...
+             wctp,ictp,nctp, nfrc] = doQulityControl_1deg(...
+             wfrc,wcod,wcre, ifrc,icod,icre, ofrc,ocod,ocre, ctop);
+            
+%keyboard
+%return
+
+            %-- output prepared cloud data
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'cld.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(wcod), 'int32');
+               fwrite(fid, size(wcod),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, nctp, 'float32');
+               fwrite(fid, wfrc, 'float32');
+               fwrite(fid, wcre, 'float32');
+               fwrite(fid, wcod, 'float32');
+               fwrite(fid, ifrc, 'float32');
+               fwrite(fid, icre, 'float32');
+               fwrite(fid, icod, 'float32');
+               fwrite(fid, tfrc, 'float32');
+            fclose(fid);
+
+               
+         end %--for ifl = 1:numFiles
+      
+      end %--for atv=timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+
+%----------------------------------------------------------------------
+function [wfrc,wcod,wcre,...
+          ifrc,icod,icre,...
+          wctp,ictp,nctp, tfrc] = doQulityControl_1deg(...
+                                  wfrc,wcod,wcre,...
+                                  ifrc,icod,icre,...
+                                  ofrc,ocod,ocre, ctp)
+%----------------------------------------------------------------------
+   
+   % * cfrc values could be NaN,0 or number(=0..1), "0" is special (means clear).
+   %   ccre values could be NaN or number, "0" is not special.
+   %   ccod values could be NaN or number, "0" is not special.
+   %   cctp values could be NaN or number, "0" is not special.
+   
+      
+   %-----
+   %
+   ictp = ctp;
+   wctp = ctp;
+   octp = ctp;
+   
+   ifrc(ifrc<0) = NaN;
+   icod(icod<0) = NaN;
+   icre(icre<0) = NaN;
+   ictp(ictp<0) = NaN;
+
+   wfrc(wfrc<0) = NaN;
+   wcod(wcod<0) = NaN;
+   wcre(wcre<0) = NaN;
+   wctp(wctp<0) = NaN;
+
+   ofrc(ofrc<0) = NaN;
+   ocod(ocod<0) = NaN;
+   ocre(ocre<0) = NaN;
+   octp(octp<0) = NaN;
+
+
+
+   %----- Undetermined phase clouds count as water clouds.
+   %
+   wtrCld = wfrc>0;
+   wtrClr = wfrc==0;
+   wtrNaN = isnan(wfrc);
+   othCld = ofrc>0;
+   othClr = ofrc==0;
+   %othNaN = isnan(ofrc);
+
+
+   sb = (wtrClr | wtrNaN) & othClr;
+   if any(sb(:))
+      wfrc(sb) = 0;
+      wcod(sb) = NaN;
+      wcre(sb) = NaN;
+      wctp(sb) = NaN;
+   end
+   
+   sb = (wtrClr | wtrNaN) & othCld;
+   if any(sb(:))
+      wfrc(sb) = ofrc(sb);
+      wcod(sb) = ocod(sb);
+      wcre(sb) = ocre(sb);
+      wctp(sb) = octp(sb);
+   end
+   
+   %sb = wtrCld & othClr;
+   
+   sb = wtrCld & othCld;
+   if any(sb(:))
+     
+      %--- becareful there are cases when
+      %    wfrc or ofrc >0 but wcod or ocod <0
+      %
+
+      %wv = wcod(sb); wf = wfrc(sb);
+      %ov = ocod(sb); of = ofrc(sb);
+      %tv = nan(size(wv));
+      %for i=1:length(wv)
+      %   if wv(i)>=0 && ov(i)>=0
+      %      tv(i) = (wv(i)*wf(i) + ov(i)*of(i)) / (wf(i)+of(i));
+      %   elseif wv(i)>=0
+      %      tv(i) = wv(i);
+      %   elseif ov(i)>=0
+      %      tv(i) = ov(i);
+      %   else
+      %      tv(i) = NaN;
+      %   end
+      %end
+      
+      tC = { wcod(sb),ocod(sb);...
+             wcre(sb),ocre(sb);...
+             wctp(sb),octp(sb); };
+
+      for ip = 1:size(tC,1)
+         wv = tC{ip,1};
+         ov = tC{ip,2};
+         wf = wfrc(sb);
+         of = ofrc(sb);
+         wv(isnan(wv))=0.;
+         wf(isnan(wv))=0.;
+         ov(isnan(ov))=0.;
+         of(isnan(ov))=0.;
+         ff = wf+of;
+         tv = wv.*wf + ov.*of;
+         tv(ff~=0) = tv(ff~=0) ./ ff(ff~=0);
+         tv(ff==0) = NaN; %shouldn't have tv==0, since both wfrc and ofrc >0.
+
+         tC{ip,2} = tv;
+      end
+      wcod(sb) = tC{1,2};
+      wcre(sb) = tC{2,2};
+      wctp(sb) = tC{3,2};
+
+      %--- "wfrc" has to be the last one to be changed!
+      wfrc(sb) = wfrc(sb) + ofrc(sb);
+   end
+
+   
+   
+
+   
+   %----- ice clouds
+   %
+   iceCld = ifrc>0;
+   iceClr = ifrc==0;
+   iceNaN = isnan(ifrc) | ...
+            ( iceClr & (~isnan(icod)|~isnan(icre)|~isnan(ictp)) ); %pixle has problem, so set to NaN.
+
+   %icod( iceCld & isnan(icod) ) = nanmedian( icod(iceCld) ); %exp(nanmean( log(icod(iceCld)) ));
+   %icre( iceCld & isnan(icre) ) = nanmedian( icre(iceCld) );
+   %ictp( iceCld & isnan(ictp) ) = nanmedian( ictp(iceCld) );
+
+   %--- Filled with zonal mean. Is this a good idea?
+   %
+   tC = { icod, 0;...
+          icre, 0;...
+          ictp, 0 };
+   for ip = 1:size(tC,1)
+
+      tM = tC{ip,1};
+      ms = iceCld & isnan(tM);
+      if any(ms(:))
+         zM = repmat( nanmean(tM),[size(tM,1),1] );
+         tM(ms)=zM(ms);
+
+         tC{ip,1} = tM;
+         tC{ip,2} = 1; %set the Flag
+      end
+   end
+   if tC{1,2}==1 icod = tC{1,1}; end
+   if tC{2,2}==1 icre = tC{2,1}; end
+   if tC{3,2}==1 ictp = tC{3,1}; end
+
+
+   icod( iceCld & isnan(icod) ) = 2.5; %if still missing
+   icre( iceCld & isnan(icre) ) = 20;  %if still missing
+   ictp( iceCld & isnan(ictp) ) = 250; %if still missing
+
+   ifrc( iceNaN ) = NaN;
+   icod( iceNaN ) = NaN;
+   icre( iceNaN ) = NaN;
+   ictp( iceNaN ) = NaN;
+   
+   ifrc( iceClr ) = 0;
+   icod( iceClr ) = NaN;
+   icre( iceClr ) = NaN;
+   ictp( iceClr ) = NaN;
+   
+
+
+
+   %----- water clouds
+   %
+   wtrCld = wfrc>0;
+   wtrClr = wfrc==0;
+   wtrNaN = isnan(wfrc) |...
+            ( wtrClr & (~isnan(wcod)|~isnan(wcre)|~isnan(wctp)) ); %pixle has problem, so set to NaN.
+
+   %wcod( wtrCld & isnan(wcod) ) = nanmedian( wcod(wtrCld) ); %exp(nanmean( log(wcod(wtrCld)) ));
+   %wcre( wtrCld & isnan(wcre) ) = nanmedian( wcre(wtrCld) );
+   %wctp( wtrCld & isnan(wctp) ) = nanmedian( wctp(wtrCld) );
+   
+   %--- Fill with zonal mean. Not sure if this is a good idea?
+   %
+   tC = { wcod, 0;...
+          wcre, 0;...
+          wctp, 0 };
+   for ip = 1: size(tC,1)
+
+      tM = tC{ip,1};
+      ms = wtrCld & isnan(tM);
+      if any(ms(:))
+         zM = repmat( nanmean(tM),[size(tM,1),1] );
+         tM(ms)=zM(ms); %filled with zonal mean
+         
+         tC{ip,1} = tM;
+         tC{ip,2} = 1; %set the Flag
+      end
+   end
+   if tC{1,2}==1 wcod = tC{1,1}; end
+   if tC{2,2}==1 wcre = tC{2,1}; end
+   if tC{3,2}==1 wctp = tC{3,1}; end
+   
+
+   wcod( wtrCld & isnan(wcod) ) = 15;  %if still missing
+   wcre( wtrCld & isnan(wcre) ) = 8;   %if still missing
+   wctp( wtrCld & isnan(wctp) ) = 750; %if still missing
+
+   wfrc( wtrNaN ) = NaN;
+   wcod( wtrNaN ) = NaN;
+   wcre( wtrNaN ) = NaN;
+   wctp( wtrNaN ) = NaN;
+   
+   wfrc( wtrClr ) = 0;
+   wcod( wtrClr ) = NaN;
+   wcre( wtrClr ) = NaN;
+   wctp( wtrClr ) = NaN;
+
+
+
+
+   %-- redefine the cloud frations, since ifrc and wfrc 
+   %   may have been changed.
+   iceCld = ifrc>0;
+   iceClr = ifrc==0;
+   wtrCld = wfrc>0;
+   wtrClr = wfrc==0;
+      
+   %-- new clout top pressure
+   nctp = nan(size(ctp));
+   nctp(iceCld) = ictp(iceCld);
+   nctp(wtrCld) = wctp(wtrCld);
+   nctp(wfrc>=ifrc) = wctp(wfrc>=ifrc); %overlap part
+   nctp(wfrc< ifrc) = ictp(wfrc< ifrc); %overlap part
+
+   %-- total cloud frction. This is not needed in SRB model.
+   tfrc = nan(size(wfrc));
+   tfrc(iceCld) = ifrc(iceCld);
+   tfrc(wtrCld) = wfrc(wtrCld);
+   tfrc( wtrCld&iceCld ) = wfrc(wtrCld&iceCld) + ifrc(wtrCld&iceCld);
+   %tfrc( wtrCld&iceCld ) = max( wfrc(wtrCld&iceCld),ifrc(wtrCld&iceCld) );
+   tfrc( wtrClr&iceClr ) = 0; %clear part
+
+%keyboard   
+end %-----------------------------------------------------
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function prepare_cloud_5km( timeV, satV, prepOutPath,saveSRC )
+%----------------------------------------------------------------------
+
+   %yrV  = [2005];
+   %monV = [1,2];
+   %dayV = [];
+   %satV = {'terra','aqua'}; 
+   
+   %inPathModisCld = '/data/pkgroup1/xiaolei/WUSA/'; %2005
+   inPathModisCld = '/aosc/ceop/Data/Sat_Data/MODIS/Western_USA/'; %..2010
+
+   resultPath0 = [prepOutPath, 'cloud/'];
+
+
+
+   %-- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+
+   for isat = 1:length(satV)
+      satName = satV{isat};
+
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+                     
+         if iyr==2005
+            hdfPath = [inPathModisCld,'/','S',yyyy,'/',satName,'/cloud/'];%2005
+         else
+            hdfPath = [inPathModisCld,'/',yyyy,'/'];%2009,2010
+         end
+         nameList = dir([hdfPath,'/',satStr,'06_L2.A',yyyy,ddd,'.*.hdf']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = fileName(19:22);
+            hrmin = str2num(hhmm);
+
+            disp(fileName)
+      
+            %-- read the MODIS swath cloud data
+            %
+            fullName = [hdfPath, fileName];
+            hdfID = hdfsd('start',fullName,'read');
+               latM = obtain_hdf_datafield(hdfID, 'Latitude', 'doScl','doNaN'); % (deg,-90..90)
+               lonM = obtain_hdf_datafield(hdfID, 'Longitude', 'doScl','doNaN');% (deg,-180..180)
+               ctpM = obtain_hdf_datafield(hdfID, 'Cloud_Top_Pressure_Day','doScl','doNaN'); % (hPa), 5km res.
+               codM = obtain_hdf_datafield(hdfID, 'Cloud_Optical_Thickness','doScl','doNaN');% (), 1km res.
+               qltM = obtain_hdf_datafield(hdfID, 'Quality_Assurance_1km','',''); % (), 1km res.
+               %M = obtain_hdf_datafield(hdfID, 'Cloud_Optical_Thickness_Uncertainty','',''); % (), 1km res.
+               %M = obtain_hdf_datafield(hdfID, 'Cloud_Effective_Radius_Uncertainty','',''); % (), 1km res.
+               %M = obtain_hdf_datafield(hdfID, 'Cloud_Phase_Infrared','',''); % (), 1km res.
+               %M = obtain_hdf_datafield(hdfID, 'Cloud_Phase_Optical_Properties','',''); % (), 1km res.
+               %M = obtain_hdf_datafield(hdfID, 'Surface_Type','',''); % (), 1km res.
+               if ismember(lower([satName,yyyy,ddd,hhmm]),...
+                     {'terra20051261705',...%cloud drop size has problem!
+                     })
+                  creM = nan(size(codM));
+               else
+                  creM = obtain_hdf_datafield(hdfID, 'Cloud_Effective_Radius','doScl','doNaN'); % (micron), 1km res.
+               end
+            sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+            %-- invalid lat and lon values set to NaN
+            latM(latM<-100)=NaN;
+            lonM(lonM<-200)=NaN;
+
+%this part needs test!120422
+%            %-- if any lat,lon are NaN tried to interplate the
+%            %   lat, lon values.
+%            %   This is done for cloud lat, lon only, since all the 
+%            %   other products will be made to match the cloud 
+%            %   data later in prep_input().
+%            %
+%            nanLat = isnan(latM); %[NX,NY]
+%            nanLon = isnan(lonM); %[NX,NY]
+%            if any(any(nanLat)) || any(any(nanLon))
+%               iv = [1:size(latM,1)]; %latM:[nX,nY]
+%               jv = [1:size(latM,2)]; %latM:[nX,nY]
+%               [iM,jM] = meshgrid(iv,jv);
+%
+%               nz = ~nanLat & ~nanLon;
+%               iMV  = iM(nz);
+%               jMV  = jM(nz);
+%               latV = latM(nz);
+%               lonV = lonM(nz);
+%
+%               F = TriScatteredInterp( iMV,jMV,latV );
+%               latM(nanLat) = F( iM(nanLat), jM(nanLat) );
+%               
+%               F = TriScatteredInterp( iMV,jMV,lonV );
+%               lonM(nanLon) = F( iM(nanLon), jM(nanLon) );
+%            end
+            
+
+            %-- Cloud phasing
+            %   cloud frction =0..1
+            [wfrc,wcod,wcre, ifrc,icod,icre] =...
+                  cloudPhasing_5km(qltM, latM, lonM, codM, creM);
+
+
+            %-- Do cloud qulity control
+            [wfrc,wcod,wcre,...
+             ifrc,icod,icre,...
+             wctp,ictp,nctp, tfrc] = doQulityControl_5km(...
+                            wfrc,wcod,wcre, ifrc,icod,icre, ctpM);
+            
+
+%keyboard
+%return
+
+            %-- output prepared cloud data
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'cld.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(wcod), 'int32');
+               fwrite(fid, size(wcod),  'int32');
+               fwrite(fid, latM, 'float32');
+               fwrite(fid, lonM, 'float32');
+               fwrite(fid, nctp, 'float32');
+               fwrite(fid, wfrc, 'float32');
+               fwrite(fid, wcre, 'float32');
+               fwrite(fid, wcod, 'float32');
+               fwrite(fid, ifrc, 'float32');
+               fwrite(fid, icre, 'float32');
+               fwrite(fid, icod, 'float32');
+               fwrite(fid, tfrc, 'float32');
+            fclose(fid);
+
+         end %--for ifl = 1:numFiles
+      
+      end %--for atv = timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+
+%----------------------------------------------------------------------
+function [wfrc,wcod,wcre, ifrc,icod,icre, wctp,ictp,nctp, tfrc] =...
+                doQulityControl_5km(wfrc,wcod,wcre, ifrc,icod,icre, ctp)
+%----------------------------------------------------------------------
+   
+   % * cfrc values could be NaN,0 or number(=0..1), "0" is special (means clear).
+   %   ccre values could be NaN or number, "0" is not special.
+   %   ccod values could be NaN or number, "0" is not special.
+   %   cctp values could be NaN or number, "0" is not special.
+   
+   ictp = ctp;
+   wctp = ctp;
+   
+   ifrc(ifrc<0) = NaN;
+   icod(icod<0) = NaN;
+   icre(icre<0) = NaN;
+   ictp(ictp<0) = NaN;
+
+   wfrc(wfrc<0) = NaN;
+   wcod(wcod<0) = NaN;
+   wcre(wcre<0) = NaN;
+   wctp(wctp<0) = NaN;
+   
+
+   %-- ice clouds
+   %
+   iceCld = ifrc>0;
+   iceClr = ifrc==0;
+   iceNaN = isnan(ifrc) | ...
+            ( iceClr & (~isnan(icod)|~isnan(icre)|~isnan(ictp)) ); %pixle has problem, so set to NaN.
+   
+   icod( iceCld & isnan(icod) ) = nanmedian( icod(iceCld) ); %exp(nanmean( log(icod(iceCld)) ));
+   icre( iceCld & isnan(icre) ) = nanmedian( icre(iceCld) );
+   ictp( iceCld & isnan(ictp) ) = nanmedian( ictp(iceCld) );
+
+   icod( iceCld & isnan(icod) ) = 2.5; %if still missing
+   icre( iceCld & isnan(icre) ) = 20;  %if still missing
+   ictp( iceCld & isnan(ictp) ) = 250; %if still missing
+
+   ifrc( iceNaN ) = NaN;
+   icod( iceNaN ) = NaN;
+   icre( iceNaN ) = NaN;
+   ictp( iceNaN ) = NaN;
+   
+   ifrc( iceClr ) = 0;
+   icod( iceClr ) = NaN;
+   icre( iceClr ) = NaN;
+   ictp( iceClr ) = NaN;
+   
+
+   %-- water clouds
+   %
+   wtrCld = wfrc>0;
+   wtrClr = wfrc==0;
+   wtrNaN = isnan(wfrc) |...
+            ( wtrClr & (~isnan(wcod)|~isnan(wcre)|~isnan(wctp)) ); %pixle has problem, so set to NaN.
+
+   wcod( wtrCld & isnan(wcod) ) = nanmedian( wcod(wtrCld) ); %exp(nanmean( log(wcod(wtrCld)) ));
+   wcre( wtrCld & isnan(wcre) ) = nanmedian( wcre(wtrCld) );
+   wctp( wtrCld & isnan(wctp) ) = nanmedian( wctp(wtrCld) );
+
+   wcod( wtrCld & isnan(wcod) ) = 10;  %if still missing
+   wcre( wtrCld & isnan(wcre) ) = 8;   %if still missing
+   wctp( wtrCld & isnan(wctp) ) = 750; %if still missing
+
+   wfrc( wtrNaN ) = NaN;
+   wcod( wtrNaN ) = NaN;
+   wcre( wtrNaN ) = NaN;
+   wctp( wtrNaN ) = NaN;
+   
+   wfrc( wtrClr ) = 0;
+   wcod( wtrClr ) = NaN;
+   wcre( wtrClr ) = NaN;
+   wctp( wtrClr ) = NaN;
+
+
+   %-- redefine the cloud frations, since ifrc and wfrc 
+   %   may have been changed.
+   iceCld = ifrc>0;
+   iceClr = ifrc==0;
+   wtrCld = wfrc>0;
+   wtrClr = wfrc==0;
+      
+   %-- new clout top pressure
+   nctp = nan(size(ctp));
+   nctp(iceCld) = ictp(iceCld);
+   nctp(wtrCld) = wctp(wtrCld);
+   nctp(wfrc>=ifrc) = wctp(wfrc>=ifrc); %overlap part
+   nctp(wfrc< ifrc) = ictp(wfrc< ifrc); %overlap part
+
+   %-- total cloud frction. This is not needed in SRB model.
+   tfrc = nan(size(wfrc));
+   tfrc(iceCld) = ifrc(iceCld);
+   tfrc(wtrCld) = wfrc(wtrCld);
+   tfrc( wtrCld&iceCld ) = wfrc(wtrCld&iceCld) + ifrc(wtrCld&iceCld);
+   %tfrc( wtrCld&iceCld ) = max( wfrc(wtrCld&iceCld),ifrc(wtrCld&iceCld) );
+   tfrc( wtrClr&iceClr ) = 0; %clear part
+
+%keyboard   
+end %-----------------------------------------------------
+
+
+
+
+
+%----------------------------------------------------------------------
+function [wfrc,wcod,wcre, ifrc,icod,icre] =...
+                       cloudPhasing_5km(qltM, latM, lonM, codM, creM)
+%----------------------------------------------------------------------
+
+%
+% MODIS swath cloud data data quality control information:
+%
+% Quality_Assurance_1km (720, 15)
+%    8-bit integer,    2030 x 1354 x 5
+%    Number of attributes = 11
+%        _FillValue = 0
+%        valid_range = 0,-1
+%        long_name = Quality Assurance at 1x1 Resolution
+%        units = none
+%        scale_factor = 1.0
+%        add_offset = 0.0
+%        Parameter_Type = Output
+%        Cell_Along_Swath_Sampling = 1,2030,1
+%        Cell_Across_Swath_Sampling = 1,1354,1
+%        Geolocation_Pointer = External MODIS geolocation product
+%        description = Quality Assurance 1km reports on Cloud Optical Properties                           
+%algorithm performance.  Refer to MOD_PR06OD User Documentation and the              
+%MODIS atmosphere QA plan for complete descriptions and coding examples.             
+%                                                                                    
+% Bit fields within each byte are numbered from the left:                            
+% 7, 6, 5, 4, 3, 2, 1, 0.                                                            
+% The left-most bit (bit 7) is the most significant bit.                             
+% The right-most bit (bit 0) is the least significant bit.                           
+%                                                                                    
+%                                                                                    
+% Byte 0                                                                             
+% ------                                                                             
+%                                                                                    
+% bit field       Description                             Key                        
+% ---------       -----------                             ---                        
+%                                                                                    
+% Byte 0 -----------------------------------------------------------------           
+%  0              Optical Thickness General QA       0 = Not Useful                  
+%                                                    1 = Useful                      
+%  2,1            Optical Thickness Confidence QA    00 = No confidence              
+%                                                    01 = Marginal                   
+%                                                    10 = Good                       
+%                                                    11 = Very Good                  
+%  4,3            Optical Thickness out-of-bounds    00 = OT < 100                   
+%                                                    01 = 100 < OT < 150             
+%                                                    10 = OT > 150                   
+%                                                    11 = Albedo  too high           
+%  5              Effective Radius General QA        0 = Not Useful                  
+%                                                    1 = Useful                      
+%  7,6            Effective Radius Confidence QA     00 = No confidence              
+%                                                    01 = Marginal                   
+%                                                    10 = Good                       
+%                                                    11 = Very Good                  
+% Byte 1 -----------------------------------------------------------------           
+%  0              Liquid Water Path General QA       0 = Not Useful                  
+%                                                    1 = Useful                      
+%  2,1            Liquid Water Path Confidence QA    00 = No confidence              
+%                                                    01 = Marginal                   
+%                                                    10 = Good                       
+%                                                    11 = Very Good                  
+%  5,4,3          1621 Retrieval processing path     000 = No Cloud Mask             
+%                                                    001 = No Cloud                  
+%                                                    010 = Water Cloud               
+%                                                    011 = Ice Cloud                 
+%                                                    100 = Unknown Cloud             
+%  6              1621 Retrieval Outcome             0 = Failed/No  attempt          
+%                                                    1 = Successful                  
+% Byte 2 -----------------------------------------------------------------           
+%  2,1,0          Primary retrieval processing path  000 = No Cloud Mask             
+%                                                    001 = No Cloud                  
+%                                                    010 = Water Cloud               
+%                                                    011 = Ice Cloud                 
+%                                                    100 = Unknown Cloud             
+%  3              Retrieval Outcome                  0 = Failed/No  attempt          
+%                                                    1 = Successful                  
+%  4              Rayleigh Correction                0 = No Correction               
+%                                                    1 = Correction                  
+%  5              Water Vapor Correction             0 = No Correction               
+%                                                    1 = Correction                  
+%  7,6            Band Used for Optical Thickness Retrieval                          
+%                                                    00 = No attempt                 
+%                                                    01 = .645 micron                
+%                                                    10 = .858 micron                
+%                                                    11 = 1.24 micron                
+% Byte 3 -----------------------------------------------------------------           
+%  0              Optical Thickness 1621 General QA  0 = Not Useful                  
+%                                                    1 = Useful                      
+%  2,1            Optical Thickness 1621 Condifence QA                               
+%                                                    00 = No confidence              
+%                                                    01 = Marginal                   
+%                                                    10 = Good                       
+%                                                    11 = Very Good                  
+%  3              Effective Radius 1621 General QA   0 = Not Useful                  
+%                                                    1 = Useful                      
+%  5,4            Effective Radius 1621 Confidence QA                                
+%                                                    00 = No confidence              
+%                                                     01 = Marginal                   
+%                                                    10 = Good                       
+%                                                    11 = Very Good                  
+%  6,7            Clear Sky Restoral Type QA                                         
+%                                       00 = Not Restored                            
+%                                       01 = Restored Via Edge detection             
+%                                       10 = Restored Via Spatial  Variance          
+%                                       11 = Restored Via 250m Tests                 
+% Byte 4 -----------------------------------------------------------------           
+%  0              Water Path 1621 General QA         0 = Not Useful                  
+%                                                    1 = Useful                      
+%   2,1            Water Path 1621 Confidence QA      00 = No confidence              
+%                                                     01 = Marginal                   
+%                                                     10 = Good                       
+%                                                     11 = Very Good                  
+%  5,4,3          Multi Layer Cloud Flag      000 = Cloud Mask Undet                 
+%                                             001 = Decision tree stop               
+%                                             010 = single layer: water              
+%                                             011 = multi layer: water               
+%                                             100 = single layer: ice                
+%                                             101 = multi layer: ice                 
+%                                             110 = single layer:  unknown           
+%                                             111 = multi layer: unknown
+% 
+
+
+   %-- cloud phasing and downscale from 1km to 5km resolution.
+   % * Multi Layer Cloud Flag (bit 5,4,3)
+   %   0 000 = Cloud Mask Undet                   
+   %   1 001 = Decision tree stop               
+   %   2 010 = single layer: water              
+   %   3 011 = multi layer: water               
+   %   4 100 = single layer: ice                
+   %   5 101 = multi layer: ice                 
+   %   6 110 = single layer:  unknown           
+   %   7 111 = multi layer: unknown
+   % 
+   % * cfrc values could be NaN,0 or number(=0..1), "0" is special (means clear).
+   %   ccre values could be NaN or number, "0" is not special.
+   %   ccod values could be NaN or number, "0" is not special.
+   %
+   cldMask = squeeze(qltM(5,:,:)); %Multi Layer Cloud Flag
+   cldMask = bitand(uint8(cldMask),uint8(bin2dec('00111000')));
+   cldMask = bitshift(cldMask,-3);
+
+   box=5;
+   numX = size(latM,1);
+   numY = size(latM,2);
+   tX = min( size(cldMask,1), numX*box );
+   tY = min( size(cldMask,2), numY*box );
+
+   tM = uint8( nan(numX*box,numY*box) ); %uint8 NaN=0
+   tM(1:tX,1:tY) = cldMask(1:tX,1:tY);
+   tM = reshape(tM, box, numX, box, numY);
+   tM = permute(tM, [1,3,2,4]); %[box,box,numX,numY]
+   tM = reshape(tM, box*box,numX,numY); % uint8 precision
+
+   undef    = (tM==0);
+   numUndef = squeeze(sum(undef,1));
+   numPix   = box*box - numUndef;
+   nanBox   = numPix==0;
+
+   wcld = (tM==2 | tM==3 | tM==6 | tM==7);
+   wfrc = double( squeeze(sum(wcld,1)) ) ./ numPix; %value=0..1, 0 or NaN
+   %devided by 0 already lead to NaN; wfrc(nanBox)=NaN; 
+   
+   icld = (tM==4 | tM==5);
+   ifrc = double( squeeze(sum(icld,1)) ) ./ numPix; %value=0..1, 0 or NaN
+   %devided by 0 already lead to NaN; ifrc(nanBox)=NaN;
+   
+
+   %-- cloud effective radius
+   %
+   tM = nan(numX*box,numY*box); %double precision
+   tM(1:tX,1:tY) = creM(1:tX,1:tY);
+   tM = reshape(tM, box, numX, box, numY);
+   tM = permute(tM, [1,3,2,4]); %[box,box,numX,numY]
+   tM = reshape(tM, box*box,numX,numY);
+   
+   wcre = tM;
+   wcre(~wcld) = NaN;
+   wcre = squeeze( nanmean(wcre,1) ); %value=number or NaN, "0" is not special
+   
+   icre = tM;
+   icre(~icld) = NaN;
+   icre = squeeze( nanmean(icre,1) ); %value=number or NaN, "0" is not special
+   
+   
+   %-- cloud optical depth
+   %
+   tM = nan(numX*box,numY*box); %double precision
+   tM(1:tX,1:tY) = codM(1:tX,1:tY);
+   tM = reshape(tM, box, numX, box, numY);
+   tM = permute(tM, [1,3,2,4]); %[box,box,numX,numY]
+   tM = reshape(tM, box*box,numX,numY);
+   
+   wcod = tM;
+   wcod(~wcld) = NaN;
+   wcod = log( wcod );
+   wcod = squeeze( nanmean(wcod,1) );
+   wcod = exp( wcod );  %value=number or NaN, "0" is not special
+
+   icod = tM;
+   icod(~icld) = NaN;
+   icod = log( icod );
+   icod = squeeze( nanmean(icod,1) );
+   icod = exp( icod );  %value=number or NaN, "0" is not special
+   
+%keyboard
+end %-----------------------------------------------------
+
+
+
+%++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

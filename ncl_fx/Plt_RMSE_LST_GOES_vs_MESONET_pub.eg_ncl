@@ -1,0 +1,289 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "./ScatterPlt.ncl" 
+ 
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+
+;++++ Head +++++
+    dynt     = "Allday";"day";"night"; 
+    nStd     = 0;
+    wkstype     = "pdf";"eps";"x11";"png";
+
+    vName    = "LST" 
+    Sat      = "GOES"  
+    SatP     = "E";"W";
+    
+    version  = "UMD_RTTOV";"UMD_MORTRAN";
+ 
+    St       = "mesonet";
+    timeStep = "inst_hourly"
+    
+    plotValue = "A";AbsoluteValue;"P";percentage;
+    UNDEF= -999.0
+    nhour= 24
+  ;++++++ Plot Parameters  ++++++
+    optCldMsk     = True ;False;
+    optOutlier    = True ;False;
+    if  nStd.eq.0 then
+        optOutlier    = False 
+    end if
+  
+    pth     = "./data/"
+    pltpth  = "./figs/"  
+    
+    monstr      = (/"JAN","FEB","MAR","APR","MAY","JUN",\
+                    "JUL","AUG","SEP","OCT","NOV","DEC"/)
+  
+;++++ Read Ground truth ++++ 
+     year     = "2004-2007"
+     NcVar    = "SKT_hr_"+str_lower(dynt)
+     facility = ""
+     grp      = "all";"partL";"partH";"single";
+          
+     file1    = "SKT_mesonet_141st_inst_19990419_20071231_dynt.nc"
+     lines  = asciiread("/data/srb3/wchen/Groundtruth/SKT/stinfo.txt",-1,"string")
+     nline  = dimsizes(lines)
+     tmp    = reshape(lines,(/3,nline/3/))
+     stNames= tmp(0,:)
+     StLat  = stringtofloat(tmp(1,:))
+     StLon  = stringtofloat(tmp(2,:))
+     print("Read Data") 
+      
+     f1 = addfile(pth+file1,"r") 
+     print(f1)
+     date   = f1->date
+     indts  = ind(date.eq.20040101)
+     indte  = ind(date.eq.20071231) 
+     yyyymmdd   = date(indts:indte)
+     stdata = f1->$NcVar$(indts:indte,:,:)
+     stdata = (/stdata+273./)
+     stdata = where(stdata.gt.220, stdata,UNDEF)
+     printVarSummary(stdata)
+     printMinMax(stdata,True)
+     dimsz  = dimsizes(stdata)
+     ntime  = dimsz(0)
+     nSt    = dimsz(2)
+     ;temp   = f1->SKT
+     ;print(temp(:,:,:,140))
+     ;exit
+     stdata := reshape(stdata,(/ntime*nhour,nSt/))
+     stdata@_FillValue = UNDEF
+;++++ Read Estimate data ++++  
+     file2 = "LST_GOES_E_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009"  
+     if optCldMsk then
+        file2 = file2+"_addCldMsk"
+        pth1  = pth
+     else
+        pth1 = pth+"/cldmsk_orig/"
+     end if ;if optCldMsk
+     print(pth1+file2+".nc")
+     f2 = addfile(pth1+file2+".nc","r")      
+     eastdata  = f2->lst(0:ntime-1,:,:)
+     eastdata  = where(eastdata.gt.0,eastdata,UNDEF)
+     eastdata@_FillValue   = UNDEF  
+     printVarSummary(eastdata)
+     printMinMax(eastdata,True)
+     
+     file3      = "LST_GOES_W_"+version+"_4_"+St+facility+"_"+nSt+"st_inst_hourly_2004_2009.nc"     
+     f3         = addfile(pth+"/cldmsk_orig/"+file3,"r")     
+     westdata   = f3->lst(0:ntime-1,:,:)
+     westdata   = where(westdata.gt.0,westdata,UNDEF)
+     westdata@_FillValue   = UNDEF  
+     printVarSummary(westdata)
+     printMinMax(westdata,True)
+     
+     westdata = where(ismissing(eastdata),UNDEF,westdata)
+     eastdata = where(ismissing(westdata),UNDEF,eastdata)
+     
+     eastdata := reshape(eastdata,(/ntime*nhour,nSt/))
+     eastdata@_FillValue = UNDEF
+     westdata := reshape(westdata,(/ntime*nhour,nSt/))
+     westdata@_FillValue = UNDEF
+;++++ Data processing
+        if dynt.eq."day" then
+            dynt = "Daytime"
+        end if
+        if dynt.eq."night" then
+            dynt="Night-time"
+        end if
+        if dynt.eq."Allday" then
+            dynt = "All-day"
+        end if 
+        wksname = "RMSE_"+vName+"_"+St+\
+               "_vs_"+Sat+"_"+SatP+"_"+version+"_"+dynt+"_Std"+nStd  
+        if optCldMsk then
+            wksname = wksname+"_AddCldMsk"
+        end if
+        meanSt = dim_avg_n_Wrap(stdata,0)
+        rmseE = (dim_rmsd_n_Wrap(stdata,eastdata,0)/meanSt)*100.
+        rmseW = (dim_rmsd_n_Wrap(stdata,westdata,0)/meanSt)*100.
+        printMinMax(rmseE,True)
+        printMinMax(rmseW,True)
+        
+      
+        arr = (/1,1.5,2/) 
+        arra= (/3.0,4.5,6.0/)   
+                                         
+        colors = (/"red","orange","green","blue"/)  ;must be equal to dimsizes(arr)+1
+                                        
+        labels = new(dimsizes(arr)+1,string)  ; Labels for legend.
+        labelsa=labels
+
+    lat  = StLat         
+    lon  = StLon        
+    if SatP.eq."E" then
+        R   = rmseE 
+    else
+        R   = rmseW 
+    end if
+;------------------------------ 
+; Create X and Y arrays to hold the points for each range and initialize
+; them to missing values.  We want to use num_distinct_markers
+; different colors, so we need num_distinct_markers sets of X and
+; Y points.
+;
+  num_distinct_markers = dimsizes(arr)+1        ; number of distinct markers
+  lat_new = new((/num_distinct_markers,dimsizes(R)/),float,-999)
+  lon_new = new((/num_distinct_markers,dimsizes(R)/),float,-999)
+; Group the points according to which range they fall in. At the
+; same time, create the label that we will use later in the legend.
+;       
+  do i = 0, num_distinct_markers-1
+    if (i.eq.0) then
+      indexes = ind(R.lt.arr(0))
+      labels(i) = "x < " + arr(0)+"%"
+      labelsa(i) = "x < " +sprintf("%.1f",arra(0)) 
+    end if
+    if (i.eq.num_distinct_markers-1) then
+      indexes = ind(R.ge.max(arr))
+      labels(i) = "x >= " + max(arr)+"%"
+      labelsa(i) = "x >= " + sprintf("%.1f",max(arra))
+    end if
+    if (i.gt.0.and.i.lt.num_distinct_markers-1) then       
+      indexes = ind(R.ge.arr(i-1).and.R.lt.arr(i))
+      labels(i) = arr(i-1)+"%" + " <= x < " + arr(i)+"%"
+      labelsa(i) = sprintf("%.1f",arra(i-1))+ " <= x < " + sprintf("%.1f",arra(i))
+    end if
+ 
+    if (.not.any(ismissing(indexes))) then 
+      npts_range = dimsizes(indexes)   ; # of points in this range.
+      lat_new(i,0:npts_range-1) = lat(indexes)
+      lon_new(i,0:npts_range-1) = lon(indexes)
+    end if
+    delete(indexes)            ; Necessary b/c "indexes" may be a different
+                               ; size next time.
+  end do
+
+;===========================================================================
+; Begin plotting section.
+;
+  wks = gsn_open_wks(wkstype,"Polymrk_"+plotValue+"_"+wksname)              ; send graphics to PNG file
+  gsn_define_colormap(wks,"WhViBlGrYeOrRe")      ; define a different color map
+                
+;
+; Set up some map resources.
+;
+  mpres              = True
+  mpres@gsnMaximize  = True             ; Maximize plot in frame.
+  mpres@gsnFrame     = False            ; Don't advance the frame
+  
+  mpres@tmYROn                  = True
+  mpres@tmYRLabelsOn            = False
+  mpres@tmXTOn                  = False
+  
+  mpres@tmYLLabelDeltaF         = -0.35
+  mpres@tmXBLabelDeltaF         = -0.35
+
+  mpres@tmYLLabelFontThicknessF = 4
+  mpres@tmXBLabelFontThicknessF = 4
+
+  mpres@tmYLLabelFontHeightF    = 0.02
+  mpres@tmXBLabelFontHeightF    = 0.02
+  mpres@tmXBMajorThicknessF         = 2.75
+  mpres@tmYLMajorThicknessF         = 2.75
+  mpres@tmBorderThicknessF          = 2.75
+  mpres@tmYLLabelDeltaF             = -0.825
+  mpres@tmXBLabelDeltaF             = -0.825
+  mpres@tmXBMajorLengthF            = 0.01
+  mpres@tmYLMajorLengthF            = 0.01
+  mpres@pmTickMarkDisplayMode = "Always"
+
+  mpres@mpMinLatF    = 33.
+  mpres@mpMaxLatF    = 38.
+  mpres@mpMinLonF    = -103.
+  mpres@mpMaxLonF    = -94.
+  mpres@mpCenterLonF          = 0.5*(mpres@mpMinLonF+mpres@mpMaxLonF )
+  
+    mpres@mpDataSetName               = "Earth..4"
+    mpres@mpDataBaseVersion           = "MediumRes";"HighRes";
+    mpres@mpOutlineBoundarySets = "GeophysicalAndUSStates";"AllBoundaries";
+        
+            mpres@mpOutlineOn                 = True
+            mpres@mpFillAreaSpecifiers        = (/"Land", "Water","Oklahoma"/)
+            mpres@mpSpecifiedFillColors         = (/"transparent","transparent","lightgray"/)
+  ;mpres@mpFillColors = (/"transparent","transparent", \
+  ;"lightgray","transparent"/)    ;assign light gray to land masses
+
+ 
+  map = gsn_csm_map(wks,mpres)
+
+;
+;  Create logical variables to hold the marker and text resources.
+;  These markers are different than the XY markers, because they are not
+;  associated with an XY plot. You can put these markers on any plot.
+;
+  gsres               = True
+  gsres@gsMarkerIndex = 16          ; Use filled dots for markers.
+  gsres@xyMarkerSizeF     = 0.02 
+  
+  txres               = True
+  txres@txFontHeightF = 0.022
+  txres@txFontThicknessF = 4
+
+;
+; Loop through each grouping of markers, and draw them one set at
+; a time, assigning the proper color and size with gsn_marker.
+;
+; At the same time, draw a legend showing the meaning of the markers.
+;
+
+  xleg = (/0.14,0.28,0.53,0.78/)    
+  yleg = (/0.22,0.22,0.22,0.22/)   
+
+  xtxt = (/0.2,0.40,0.65,0.86/)    
+  ytxt = (/0.22,0.22,0.22,0.22/) 
+  
+   yleg = yleg+0.1
+   ytxt = ytxt+0.1  
+
+  do i = 0, num_distinct_markers-1
+    if (.not.ismissing(lat_new(i,0)))
+      gsres@gsMarkerColor      = colors(i)
+      gsres@gsMarkerThicknessF = 0.7*(i+1)
+      gsn_polymarker(wks,map,lon_new(i,:),lat_new(i,:),gsres)
+;
+; Add marker and text for the legend.
+;
+      gsn_polymarker_ndc(wks,          xleg(i),yleg(i),gsres)
+      if plotValue.eq."P" 
+      gsn_text_ndc      (wks,labels(i),xtxt(i),ytxt(i),txres)
+      else
+      gsn_text_ndc      (wks,labelsa(i),xtxt(i),ytxt(i),txres)
+      end if ;plotValue
+    end if
+  end do
+  txres@txFontThicknessF = 4
+  txres@txFontHeightF = 0.018
+  txres@txJust        = "CenterCenter"
+  gsn_text_ndc(wks,"RMSE/"+Sat+"~B~"+SatP+"~N~"+".vs."+str_upper(St),0.5,0.7,txres)
+  
+  frame(wks)    ; Advance the frame.
+
+end

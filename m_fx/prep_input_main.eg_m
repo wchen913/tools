@@ -1,0 +1,7 @@
+clc;
+clear all;
+disp('Start');
+disp('turn off warnings')
+warning('off','all')
+prep_input();
+disp('end');

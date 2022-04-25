@@ -1,0 +1,172 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "./ScatterPlt.ncl" 
+ 
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+;++++ Head +++++
+
+    ist      = 0
+    dynt     = "day";"night";"Allday"; 
+    nStd     = 3.;
+	wkstype     = "eps";"x11";"pdf";
+
+    vName    = "LST" 
+    Sat      = "GOES"  
+    keywrd   = "E";"--east";
+    version  = "UMD_RTTOV";"UMD_MORTRAN";
+ 
+    St       = "SURFRAD"  
+    timeStep = "inst_hourly"
+	
+    bin_num  =50
+
+    UNDEF= -999.0
+    nhour= 24
+  ;++++++ Plot Parameters  ++++++
+    optCldMsk     = False;True ;
+    optOutlier    = True ;False;
+  
+    if .not.optOutlier then
+        nStd     = 0;
+    end if
+   
+
+    ;/data/srb3/wchen/Groundtruth/SKT/LST_GOES_E_UMD_4_mesonet_141st_ins_hour_2004_2009.nc    
+    ;SKT_mesonet_141st_inst_19990419_20071231.nc
+    ;pth	    = "/data/srb3/wchen/Groundtruth/SKT/"
+    pth	    = "./data/"
+	pltpth  = "./figs/"  
+    
+    monstr      = (/"JAN","FEB","MAR","APR","MAY","JUN",\
+                    "JUL","AUG","SEP","OCT","NOV","DEC"/)
+                    
+              
+;
+   
+;++++ Read Ground truth ++++ 
+     year     = "2004-2009"
+     StLon   = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+     StLat   = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+     stNames = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+     nSt     = dimsizes(StLat)
+	 print("Read Data") 
+	 stName = str_upper(stNames(ist))
+     
+     date = yyyymmdd_time(2004,2009,"integer")
+     ntime = dimsizes(date)*nhour
+     
+	 file1    = "SKT_"+St+"_"+stName+"_"+year+"_"+timeStep+"_"+dynt+".dat"
+     stdata   = fbindirread(pth+file1, 0, ntime, "float")
+     stdata = where(stdata.gt.0, stdata,UNDEF)
+	 stdata@_FillValue   = UNDEF
+	 printMinMax(stdata,True)
+
+;++++ Read Estimate data ++++  
+      
+     if optCldMsk then
+        file2 = "LST_GOES_E_"+version+"_4_"+St+"_"+nSt+"st_inst_hourly_2004_2009_addCldMsk"         
+         pth1  = pth
+         f2	= addfile(pth1+file2+".nc","r") 	 
+         eastdata  = ndtooned(f2->lst(:,:,ist))
+         ;eastdata  = where(eastdata.gt.0,eastdata,UNDEF)
+         eastdata@_FillValue   = UNDEF	
+         optStr = "_addCldMsk"
+     else
+        pth1 = pth+"/cldmsk_orig/"
+        file2    = "SKT_GOES_E_"+version+"_"+St+"_"+stName+"_"+year+"_"+timeStep+"_"+"Allday.dat"
+        eastdata   = fbindirread(pth1+file2, 0, ntime, "float")
+        eastdata  = where(eastdata.gt.0,eastdata,UNDEF);235
+        eastdata@_FillValue   = UNDEF 
+        optStr = ""        
+     end if ;if optCldMsk
+	printVarSummary(eastdata)
+    printMinMax(eastdata,True)
+     pth3 = pth+"/cldmsk_orig/"
+     file3      = "SKT_GOES_E_"+version+"_"+St+"_"+stName+"_"+year+"_"+timeStep+"_"+"Allday.dat"     
+	 westdata   = fbindirread(pth3+file3, 0, ntime, "float") 	 
+	 westdata   = where(westdata.gt.0,westdata,UNDEF)
+	 westdata@_FillValue   = UNDEF	
+	 printVarSummary(westdata)
+	 printMinMax(westdata,True)
+     
+     westdata = where(ismissing(eastdata),UNDEF,westdata)
+     eastdata = where(ismissing(westdata),UNDEF,eastdata)
+;++++ Data processing
+		if dynt.eq."day" then
+			dynt = "Daytime"
+            xlim	=(/260,350,bin_num/)
+		end if
+		if dynt.eq."night" then
+			dynt="Night-time"
+            xlim	=(/250,330,bin_num/)
+		end if
+		if dynt.eq."Allday" then
+		    dynt = "All-day"
+             xlim	=(/250,350,bin_num/)
+		end if 
+        ylim  = xlim
+		wksname = vName+"_"+St+\
+               "_vs_"+Sat+"_"+version+"_"+dynt+"_Std"+nStd         
+    
+        x = ndtooned(stdata)
+        y = ndtooned(eastdata) 
+        z = ndtooned(westdata)
+        figId = dynt+"~C~"
+    
+     
+  
+;************************************************
+; plotting 
+;************************************************
+ istr=str_index_of_substr(wksname,"_",0)
+ wksname = str_insert(wksname,"_"+stName, istr(1))
+ ;print(wksname)	
+ 
+        xlabel = "Observed " +vName+" (K)"
+        ylabel = "Estimated "+vName+" (K)"
+        
+		wksname = wksname+"_Std"+nStd+"_nbin"+xlim(2)
+  
+        x@_FillValue =UNDEF
+        y@_FillValue =UNDEF
+        z@_FillValue =UNDEF
+     
+	print("........... Plotting .................")
+    wks   = gsn_open_wks (wkstype,pltpth+"heatscatter_"+wksname+optStr)
+    opt = True   
+    opt@style   = "heat"
+	opt@cmap    = "BlAqGrYeOrReVi200" 
+    plot = new ( 2, "graphic") 
+    tiStrs  = (/xlabel,ylabel,figId+"GOES_E.vs."+stName/) 
+    plot(0) = HeatScatterPlt(wks,x,y,xlim,nStd,optOutlier,tiStrs,opt)
+   
+   ;draw(plot(0))
+   ;frame(wks)
+    tiStrs  = (/xlabel,ylabel,figId+"GOES_W.vs."+stName/) 
+    plot(1) = HeatScatterPlt(wks,x,z,xlim,nStd,optOutlier,tiStrs,opt)
+    
+
+  ;draw(plot(1))
+  ;frame(wks)
+	resP                            = True
+   ;resP@gsnMaximize                = True
+   ;resP@gsnPanelYWhiteSpacePercent = 2
+    resP@gsnPanelXWhiteSpacePercent = 3
+    resP@gsnPanelLabelBar           = False
+    resP@lbOrientation              = "Vertical"
+    resP@lbLabelStride              = 2
+    resP@pmLabelBarWidthF      		= 0.85    
+    resP@lbBoxSeparatorLinesOn      = False
+       
+
+   
+     gsn_panel(wks,plot,(/1,2/),resP)
+     frame(wks)
+end

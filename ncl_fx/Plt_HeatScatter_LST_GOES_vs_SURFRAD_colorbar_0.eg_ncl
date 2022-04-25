@@ -1,0 +1,375 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "$nclfx/zenith.ncl"
+load "./heatscatter.ncl"
+load "$nclfx/attach_labelbar.ncl"
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+;DRA: Time difference 8h
+;++++ Head +++++
+    ist      = 0
+	dynt     = "day";"night"; "Allday";
+	nStd     = 3.;
+	
+    vName    = "LST" 
+    Sat      = "GOES"  
+    keywrd   = "E";"EAST";"W";"west";
+    version  = "UMD_RTTOV"; 
+ 
+    St       = "SURFRAD"   
+    timeStep = "inst_hourly"
+
+    bin_num  = 50
+
+    UNDEF= -999.0
+    nhour= 24
+  ;++++++ Plot Parameters  ++++++
+    wkstype     = "eps";"x11";"pdf";
+    cldmskF     = False;True ;
+    optOutlier  = True ;False;
+ 
+    ScatterPlt  = True ;False;    
+    lbFlag      = True;False;
+    bestfitline = True
+	stdline		= False     
+    capFlag     = False    
+
+    ;/data/srb3/wchen/Groundtruth/SKT/LST_GOES_E_UMD_4_mesonet_141st_ins_hour_2004_2009.nc    
+    ;SKT_mesonet_141st_inst_19990419_20071231.nc
+    
+	pltpth  = "./figs/"  
+    pth	    = "/data/srb2/wchen/LST/SURFRAD_obtained/";"./data/"
+    wksname = vName+"_"+St+\
+               "_vs_"+Sat+"_"+keywrd+"_"+version     
+    
+                    
+               
+;
+   
+;++++ Read Ground truth ++++ 
+     year     = "2004-2009"
+ 
+     StLon   = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+     StLat   = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+     stNames = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+     nSt     = dimsizes(StLat)
+
+     stName = str_upper(stNames(ist))
+
+     date = yyyymmdd_time(2004,2009,"integer")
+     ntime = dimsizes(date)*nhour
+
+     file1    = "SKT_"+St+"_"+stName+"_"+year+"_"+timeStep+"_"+dynt+".dat"
+     stdata   = fbindirread(pth+file1, 0, ntime, "float")
+     stdata = where(stdata.gt.235, stdata,UNDEF)
+	 stdata@_FillValue   = UNDEF
+  
+     printMinMax(stdata,True)
+     file2    = "SKT_"+Sat+"_"+keywrd+"_"+version+"_"+St+"_"+stName+"_"+year+"_"+timeStep+"_"+"Allday.dat"
+	 estdata   = fbindirread(pth+file2, 0, ntime, "float")
+     estdata  = where(estdata.gt.235,estdata,UNDEF)
+	 estdata@_FillValue   = UNDEF
+     printMinMax(estdata,True)
+	 wksname = wksname+"_"+year        
+ 
+ 
+     x = stdata 
+     y = estdata
+     dof = num(.not.ismissing((y-x)))
+   
+     
+;************************************************
+; plotting 
+;************************************************
+	if dynt.eq."day" then
+		dynt = "Daytime"
+		;    xlim =(/250,340/)
+	end if
+	if dynt.eq."night" then
+		dynt = "Night-time"
+		;	xlim = (/230,320/) 
+	end if
+ 
+ istr=str_index_of_substr(wksname,"_",0)
+ wksname = str_insert(wksname,"_"+stName, istr(1))+"_"+dynt
+ print(wksname)	
+ subfigid =  "BSRN"+"/"+stName+"~C~"+dynt;+"~C~"+" ("+sprintf("%.2f",StLat(ist))+", "+sprintf("%.2f",StLon(ist))+")"; 	
+
+	    xlim = (/230,340/);--std3;(/230,350/);--std0;
+    	
+
+		 
+        ylim	= xlim
+         
+        xlabel = "Observed " +vName+" (K)"
+        ylabel = "Estimated "+vName+" (K)"
+         
+        if capFlag then 
+          capStr = wksname
+          wksname = wksname+"_CapY"
+        else
+          capStr = ""
+        end if; capFlag
+        if lbFlag then
+            wksname = wksname+"_lbY"
+        end if
+    
+   x@_FillValue =UNDEF
+   y@_FillValue =UNDEF
+   
+    diff = y-x
+  	Corr = escorc(y,x);esccr(x,y,0)
+  	Bias = avg(diff)
+  	N    = num(.not.ismissing(diff))
+  	
+  	Std  = stddev(diff)
+  	RMS  = sqrt(avg(diff^2) )  
+    
+    bias_std = abs(toint(diff/Std))
+    print(Std)
+   ;printMinMax(bias_std,True)
+   ;exit
+	if optOutlier then
+	   wksname = wksname+"_Std"+nStd
+	   dof	   = N
+       inds	   = ind(abs(diff).gt.(nStd*Std))
+      
+      if .not.all(ismissing(inds)) then
+	   x(inds) = x@_FillValue
+	   y(inds) = y@_FillValue
+       diff    = y-x
+	   Corr = escorc(y,x);esccr(x,y,0)
+  	   Bias = avg(diff)
+  	   N    = num(.not.ismissing(diff))
+  	   Std  = stddev(diff)
+  	   RMS  = sqrt(avg(diff^2) ) 
+  	   
+  	  end if
+	else
+	    wksname = wksname+"_Std0"
+
+    end if
+    if optOutlier.or.cldmskF then
+        Nstr =  "N = "+N+" ("+sprintf("%.1f",tofloat(N)/tofloat(dof)*100.)+"%)"
+		textstr = (/"Corr = "+sprintf("%.2f",Corr),\
+	 		       "Bias = "+sprintf("%.2f",Bias)+" ("+sprintf("%.1f",abs(Bias/avg(x))*100)+"%)",\
+	 		       "RMSE = "+sprintf("%.2f",RMS)+" ("+sprintf("%.1f",abs(RMS/avg(x))*100)+"%)",\
+	 		       Nstr,\
+	 		      "Std = "+sprintf("%.2f",Std)+" ("+sprintf("%.1f",abs(Std/avg(x))*100)+"%)"/) 
+        Nstr =  "N = "+N
+    else
+        Nstr =  "N = "+N
+		 textstr = (/"Corr = "+sprintf("%.2f",Corr),\
+			  "Bias = "+sprintf("%.2f",Bias),\
+			  "RMSE = "+sprintf("%.2f",RMS),\
+			   Nstr,\
+			  "Std = "+sprintf("%.2f",Std)/)
+    end if
+   
+	print(textstr)
+		  
+    printMinMax(diff,True)
+    x = where(ismissing(diff),UNDEF,x)
+	y = where(ismissing(diff),UNDEF,y)
+ 	if ScatterPlt then
+	print("...........Scatter Plotting.................")
+	wksname   = wksname+"_nbin"+bin_num
+
+	colormaps = read_colormap_file("BlAqGrYeOrReVi200")
+	ncolor   = dimsizes(colormaps(:,0))
+
+	idat = ind(.not.ismissing(diff))
+	if .not.all(ismissing(idat)) then
+	    x:= x(idat)
+	    y:= y(idat) 
+	    x@_FillValue =UNDEF
+        y@_FillValue =UNDEF
+	end if
+	delete(idat)
+	print(dimsizes(x)+ "   " +N)
+	bin_bnds = xlim
+	opt      = False
+	color_id = heatscatter(x,y,bin_num,bin_bnds,opt)
+	delete(opt)
+	dd     = color_id@scatter_num
+	printMinMax(dd,True)
+	idxc   = toint((dd-min(dd))/(max(dd)-min(dd))*(ncolor-1))
+    printMinMax(idxc,True)
+	colors = colormaps(idxc,:)
+	;{
+	;idxc     = toint(color_id@scatter_num)
+	;nindc    = max(idxc)
+	;printMinMax(toint(color_id@scatter_num),True)
+	
+	;print(ncolor)
+	;if (ncolor-2) .gt.nindc then
+	;if (ncolor-2-nindc).gt.2 then
+	;idxc_min = toint(ncolor/2.)-toint(nindc/2.)
+	;idxc_max = toint(ncolor/2.)+toint(nindc/2.)
+	  
+	;cmap     = colormaps(idxc_min-1:idxc_max+1,:)
+	;else
+	; cmap     = colormaps(2:,:)
+    ;end if;(ncolor-2-nindc).gt.2
+	;else
+	;    print("Needs to change color map or number of bins")
+	;	exit
+	;end if
+	;delete(colormaps)
+	
+	;colors   = cmap(idxc,:)
+	;textstr = (/"Corr = "+sprintf("%.2f",Corr),\
+	;		  "Bias = "+sprintf("%.2f",Bias)+" ("+sprintf("%.1f",abs(Bias/avg(x))*100)+"%)",\
+	;		  "RMS = "+sprintf("%.2f",RMS)+" ("+sprintf("%.1f",abs(RMS/avg(x))*100)+"%)",\
+	;		   Nstr,\
+	;		  "Std = "+sprintf("%.2f",Std)+" ("+sprintf("%.1f",abs(Std/avg(x))*100)+"%)"/) 
+	;}
+	
+    ;+++ Best fit
+	rc		= regline(x,y)
+    z       = rc*(x-rc@xave)+rc@yave
+    ;printVarSummary(z)
+	
+  	
+			   
+    wks   = gsn_open_wks (wkstype,pltpth+"heatscatter_"+wksname)            ; open workstation
+    res                    = True
+    res@gsnDraw            = False
+    res@gsnFrame           = False
+  ; res@gsnMaximize            = True
+
+    res@vpXF                  = 0.2
+    res@vpYF                  = 0.85
+    res@vpHeightF             = 0.6
+    res@vpWidthF              = 0.6
+
+    res@tiMainString      = ""
+    res@tiMainFontHeightF = 0.02
+    res@tiMainOffsetYF    = 0.05
+
+    res@trXMinF = xlim(0)
+    res@trXMaxF = xlim(1)
+    res@trYMinF = ylim(0)
+    res@trYMaxF = ylim(1)
+
+    res@tmXBMajorThicknessF     = 4
+    res@tmYLMajorThicknessF     = 4
+    res@tmXBLabelFontThicknessF = 4
+    res@tmYLLabelFontThicknessF = 4
+	
+   ;res@tmXBMode              = "Manual"
+   ;res@tmXBTickStartF        = xlim(0)
+   ;res@tmXBTickEndF          = xlim(1)
+   ;res@tmXBTickSpacingF      = 50
+   ;res@tmXBLabelStride= 1
+
+     res@tmBorderThicknessF= 4.0
+     res@tmLabelAutoStride = True
+     res@tmYROn            = False
+     res@tmXTOn            = False
+     res@tmYLMinorOn       = False
+     res@tmXBMinorOn       = False
+     res@tmXBLabelFontHeightF    = 0.03
+     res@tmYLLabelFontHeightF    = 0.03
+
+     res@tmYLLabelDeltaF   = -0.65
+     res@tmXBLabelDeltaF   = -0.55
+
+     res@tiYAxisString         = ylabel
+    ;res@tiYAxisOffsetXF       = 0.01
+     res@tiYAxisFontThicknessF = 5
+     res@tiYAxisFontHeightF    = 0.03
+
+     res@tiXAxisString         = xlabel
+    ;res@tiXAxisOffsetYF       = 0.01
+     res@tiXAxisFontThicknessF = 5
+     res@tiXAxisFontHeightF    = 0.03
+
+
+
+;---Set some marker resources
+  res@xyMarkLineMode     = "Markers"
+  res@xyMarker           = 16
+ ;res@xyMarkerThicknessF = 2.5
+  res@xyMarkerSizeF      = 0.05/20.
+  res@xyMonoMarkerColor = False
+  res@xyMarkerColors     = colors
+  
+    plot = gsn_csm_xy (wks,transpose((/x,x/)), \
+                         transpose((/y,y/)),res)
+ 
+    
+
+        ;res@xyMarkLineModes   = "Markers"                ; choose which have markers
+        ;res@xyMarkers         =  NhlNewMarker(wks,"u",34,0.0,0.0,1.3125,1.5,0.0); filled triangle;16;
+        ;res@xyMarkerColor     = "blue"                    ; Marker color
+        ;res@xyMarkerSizeF     = 0.01                     ; Marker size (default 0.01)
+
+    respl   = True
+    respl@gsLineDashPattern     = 16
+    respl@gsLineColor       = "black"
+    respl@gsLineThicknessF  = 5.
+    plotpl1 = gsn_add_polyline  (wks, plot, xlim, ylim, respl)
+    if stdline then
+        respl@gsLineColor       = "red"
+        plotpl2 = gsn_add_polyline  (wks, plot, (/xlim(0)+Std,xlim(1)/), (/ylim(0),ylim(1)-Std/), respl)
+        plotpl3 = gsn_add_polyline  (wks, plot, (/xlim(0),xlim(1)-Std/), (/ylim(0)+Std,ylim(1)/), respl)
+    end if
+	
+  getvalues plot
+    "tmXBValues"             : tmXBValues
+    "tmYLValues"             : tmYLValues
+    "tmYLLabelFontHeightF"   : fonthight
+    end getvalues
+    ntym = dimsizes(tmYLValues)
+    ntxm = dimsizes(tmXBValues)
+    txxp = abs(abs(tmXBValues(1))-abs(tmXBValues(0)))*-0.15
+    txyp = abs(abs(tmYLValues(1))-abs(tmYLValues(0)))*0.5
+    txres               = True
+    txres@txFontHeightF =fonthight*0.65
+    txres@txJust        = "BottomLeft"
+
+    dum1=gsn_add_text(wks,plot,textstr(0),tmXBValues(0)+txxp,tmYLValues(ntym-1)-0.65*txyp,txres)
+    dum2=gsn_add_text(wks,plot,textstr(1),tmXBValues(0)+txxp,tmYLValues(ntym-1)-1.35*txyp,txres)
+    dum3=gsn_add_text(wks,plot,textstr(2),tmXBValues(0)+txxp,tmYLValues(ntym-1)-2.05*txyp,txres)
+    dum4=gsn_add_text(wks,plot,textstr(4),tmXBValues(0)+txxp,tmYLValues(ntym-1)-2.8*txyp,txres)
+	dum5=gsn_add_text(wks,plot,Nstr,tmXBValues(0)+txxp,tmYLValues(ntym-1)-3.5*txyp,txres)
+
+   ;dum5=gsn_add_text(wks,plot,textstr(3),tmXBValues(0)+txxp,tmYLValues(ntym-1)-3.5*txyp,txres)
+	txres@txFontHeightF =fonthight*0.625
+    txres@txJust        = "BottomRight"
+    dum6=gsn_add_text(wks,plot,subfigid  ,tmXBValues(ntxm-2)-txxp,tmYLValues(0)+txxp,txres)
+
+
+
+    ;txres@txFontHeightF = 0.015
+    ;gsn_text_ndc(wks,capStr,0.3,0.025,txres)
+        if bestfitline then
+
+       res@xyMarkLineModes   = "Lines"
+       res@xyLineThicknesses = 5.
+           res@xyLineColor       = "red"
+       plotl2  = gsn_csm_xy (wks,x,z,res)
+                overlay(plot,plotl2)
+    end if
+	
+
+	if lbFlag then
+	    labels   = toint(fspan(1,max(dd),ncolor))
+		labels  := tostring(labels)
+        labels(0)=""
+        labelbar = attach_labelbar(wks,plot,labels,colormaps)
+       ;gsn_text_ndc(wks,"(x"+((1./impct)*2.)+")",0.93,0.225,txres)
+    end if
+    draw(plot)
+    frame(wks)
+
+end if; ScatterPlt
+
+end

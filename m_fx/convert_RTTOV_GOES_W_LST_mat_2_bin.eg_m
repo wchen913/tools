@@ -1,0 +1,71 @@
+
+ clear all; clc;
+% convert GOES LST from mat file to binary file
+%--- Head
+addpath('/data/srb1/wchen/tools/m_fx/','-end')
+   SatName = 'G10';%'G12';
+   vName = 'LST';
+   
+   yr    = 2009; yrstr=num2str(yr);
+   mon   = [1:12];
+   minstr= '30';%'15';
+   
+   svdata  = 'yes';
+   %--- Geo infomation
+   nLat=501;
+   nLon=1101;
+   goesRes = 0.05;
+%    goesLatNLim = 50;
+%    goesLatSLim = 25;
+%    goesLonWLim = -125;
+%    goesLonELim = -70;
+%    goesLat     = goesLatSLim:goesRes:goesLatNLim;
+%    goesLon     = goesLonWLim:goesRes:goesLonELim;
+%    
+  
+  
+%--- 00, 15,45 min after hour
+   minute =30; mntStr=num2str(minute,'%02d');
+   skm_str='skm.i.RTTOV_MERRA2_LUT';
+%% --- Loop
+
+    for imon  = mon
+        mmstr   = num2str(imon,'%02d');
+        dt      = eomday(yr,imon);
+        %filePath= ['/data/srb2/wchen/LST/GOES_E/output/',yrstr,'_all/RTTOV/',yrstr,'_all/'];
+         filePath= ['/data/srb2/wchen/LST/GOES_W/output/',yrstr,'_all/RTTOV/',yrstr,'_all/'];
+        for dyoi = [1:dt] 
+            dd=num2str(dyoi,'%02d');
+            for hroi = [0:23];
+                hh = num2str(hroi,'%02d');
+                
+                % **** input data ****
+                fileName = [filePath,'out_',mmstr,'/',SatName,'_tp4_',num2str(yr),...
+                            '_',mmstr,'_',dd,'_',hh,minstr,'.dat_RET.mat'];  
+                %  disp(fileName)
+                %  keyboard
+              if exist(fileName)   
+                invar  = load(fileName,'sRET');
+                data   = invar.sRET.lst;                
+              else
+                disp([fileName,'  does not exist'])
+                data=nan(nLon,nLat);
+             end % if exist(fileName)  
+             if strcmpi(svdata,'yes')
+                outpth=['/data/srb2/wchen/LST/GOES_W/output/',yrstr,'_all/',num2str(yr),mmstr,'/'];
+                ofname=[num2str(yr),'_',mmstr,'_',dd,'_',hh,minstr,'_',skm_str];
+                disp([outpth,ofname])
+%                 keyboard
+                fid     = fopen([outpth,ofname],'w');
+                fwrite(fid,data,'float32');
+                fclose(fid);
+                clear data
+%             keyboard
+             end % svdata       
+            end %hori
+        end %dyoi
+    end %imon
+     
+         
+       
+

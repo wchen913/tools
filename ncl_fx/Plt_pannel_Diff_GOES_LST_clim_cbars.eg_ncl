@@ -1,0 +1,164 @@
+load "$nclfx/addmeta.ncl"
+load "./Hist_plt_1.ncl"
+load "./US_Map_plt_1.ncl"
+
+begin
+;*******************************
+; For binary files 
+;******************************* 
+;------ head
+;+++ Parameters 
+   yrstrt   = 2004
+   yrend    = 2009
+   vName    = "lst"
+	sat      =  "GOES"
+    skm     = "RTTOV"
+   ;seasons  = (/"July","Jan","July","Jan","July","Jan"/)
+   ;keywrds  = (/"G12","G12","G10","G10","Diff(G10-G12)","Diff(G10-G12)"/)
+	nplt     = 6;dimsizes(keywrds)
+	 
+	 
+	
+;+++ Flags
+    maskland      = False
+    maskwater     = True
+
+;+++ Parameters	    
+	nLat	 = 501
+	nLon	 = 1101
+
+	geoinfo  = (/25,50,-125.,-70/)
+	dimsz	 = (/nLat,nLon/)
+	dimNames = (/"lat","lon"/)
+	datatype = "float"
+	units	 = "(K)"
+	nrec	 = 0
+    UNDEF = -999.
+	          
+	 	    
+		pth         = "./data/";
+	 
+    longname    =  str_upper(sat)+" LST"+" (UMD)" 
+    monstr      = (/"JAN","FEB","MAR","APR","MAY","JUN",\
+                    "JUL","AUG","SEP","OCT","NOV","DEC"/)
+	fignote     = (/"a","c","b","d"/)
+   ;./data/clim_LST_GOES_E_UMD_RTTOV_summer_2004-2009.nc
+       fn               =  "clim_LST_GOES_E_UMD_RTTOV_summer_2004-2009.nc"
+       f                = addfile(pth+fn,"r")
+       data1            = f->lst
+	   ;data1      		= where(data1.gt.220,data1,UNDEF)
+       delete(f)
+       printMinMax(data1,True)
+       fn               =  "clim_LST_GOES_W_UMD_RTTOV_summer_2004-2009.nc"
+       f                = addfile(pth+fn,"r")
+       data2            = f->lst
+	   ;data2      		= where(data2.gt.220,data1,UNDEF)
+       delete(f)
+       printMinMax(data2,True)
+
+       fn               =  "clim_LST_GOES_E_UMD_RTTOV_winter_2004-2009.nc"
+       f                = addfile(pth+fn,"r")
+       data3            = f->lst
+	   ;data3      		= where(data3.gt.220,data1,UNDEF)
+       delete(f)
+       printMinMax(data3,True)
+
+       fn               =  "clim_LST_GOES_W_UMD_RTTOV_winter_2004-2009.nc"
+       f                = addfile(pth+fn,"r")
+       data4            = f->lst
+	   ;data4      		= where(data4.gt.220,data1,UNDEF)
+       delete(f)
+       printMinMax(data4,True)
+
+       diff1= data1
+       diff1 = (/data1-data2/)
+       printMinMax(diff1,True)
+
+       diff2= diff1
+       diff2 = (/data3-data4/)
+       printMinMax(diff2,True)
+
+ ;******************************************************
+;						 Plotting
+;******************************************************
+	print("Map Plotting")
+	pltpth    = "./figs/"
+	wkstype   = "pdf";"eps";
+	wksname   = "Clim_LST_"+sat+"_"+skm+"_"+yrstrt+"-"+yrend
+	lftstr    = ""
+	rtstr     = "" 
+	tistr     = ""
+	plot = new ( nplt, "graphic") 
+	wks = gsn_open_wks(wkstype, pltpth+"maps_clim_"+wksname+"_panel3r2c")
+	;colors = read_colormap_file("BlGrYeOrReVi200")
+	gsn_define_colormap(wks,"BlGrYeOrReVi200") 
+
+     clim1      = (/282,300,1,5/)
+     clim3      = (/255,285,1,5/) 
+     clim2      = (/-8,8,1,2/)
+     
+     lbopt = True
+    ;lbopt@Orientation = "Vertical"
+    
+     FigIdOpt = True
+     FigIdOpt@IdStr = (/"G12","JUL"/)
+     FigIdOpt@Xp    = (/-121,-75/)
+     FigIdOpt@Yp    = (/27,27/)
+     plot(0)     = US_Map_plt_update(wks,data1,clim1,FigIdOpt,False,False)
+     
+     FigIdOpt@IdStr = (/"G10","JUL"/)     
+     plot(2)    = US_Map_plt_update(wks,data2,clim1,FigIdOpt,False,lbopt)
+    
+     FigIdOpt@IdStr = (/"G12","JAN"/)     
+     plot(1)    = US_Map_plt_update(wks,data3,clim3,FigIdOpt,False,False)
+     
+     FigIdOpt@IdStr = (/"G10","JAN"/)     
+     plot(3)    = US_Map_plt_update(wks,data4,clim3,FigIdOpt,False,lbopt)
+     
+    FigIdOpt@Xp    := (/-123.5,-75/)
+
+     FigIdOpt@IdStr = (/"(G12-G10)","JUL"/)          
+     plot(4)    = US_Map_plt_update(wks,diff1,clim2,FigIdOpt,False,False)
+     
+    FigIdOpt@IdStr = (/"(G12-G10)","JAN"/)          
+    plot(5)    = US_Map_plt_update(wks,diff2,clim2,FigIdOpt,False,False) 
+     
+    txres               = True
+	txres@txFontHeightF = 0.02
+    txres@txFontThicknessF = 3	
+   
+    pres                  = True
+    pres@gsnMaximize      = True
+    pres@gsnFrame         = False  
+   ;pres@gsnPanelLabelBar = True
+   ;pres@pmLabelBarWidthF = 0.8
+   pres@gsnPanelDebug   = False
+   pres@gsnDraw = True
+   pres@gsnPanelTop = 1.0
+   pres@gsnPanelBottom = 0.485
+  ;pres@gsnPanelXF = (/0.048,0.548,0.048,0.548,0.048,0.548/)
+  ;pres@gsnPanelYF = (/0.88,0.88,0.65,0.65,0.385,0.385/)
+   pres@gsnPanelXF = (/0.048,0.548,0.048,0.548/)
+   pres@gsnPanelYF = (/0.98,0.98,0.75,0.75/)
+   gsn_panel(wks,plot(0:3),(/2,2/),pres)
+   pres@gsnPanelTop = 0.515
+   pres@gsnPanelBottom = 0.
+   pres@gsnPanelXF := (/0.048,0.548/)
+   pres@gsnPanelYF := (/0.485,0.485/)
+   pres@gsnPanelLabelBar = True
+   pres@pmLabelBarWidthF = 0.75
+   gsn_panel(wks,plot(4:5),(/1,2/),pres)
+
+  ;frame(wks)
+  
+
+	print("done")
+
+
+end
+   ;pres@gsnDraw = False
+   ;pres@gsnPanelLabelBar = True
+   ;pres@pmLabelBarWidthF = 0.8
+   ;pplots = gsn_panel_return(wks,plot(0:1),(/1,2/),pres)
+   ;bb     = NhlGetBB(pplots)
+   ;height = max(bb(0:1,0)) - min(bb(0:1,1))

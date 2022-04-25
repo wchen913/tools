@@ -1,0 +1,1547 @@
+
+%----------------------------------------------------------------------
+function prepare_albedo( timeV, prepOutPath, saveSRC, gridRes )
+%----------------------------------------------------------------------
+ %==========================================================================
+   %--- pth 5km
+   inPathSfcTyp_5km = ['/aosc/ceop/Data/Sat_Data/MODIS/aux/'];%Alternative '/data/srb1/wchen/WORK/MODIS/SRB_SW/case_5km_cp_run/aux/'
+   inPath16DayAlb_5km  = ['/data/pkgroup2/xiaolei/SWATH/S2007/albedo/'];%Alternative '/data/srb1/wchen/WORK/MODIS/SRB_SW/case_5km_cp_run/albedo/'
+
+   %--- pth Sfc Type 1deg
+    %-----pth of landmask_1.0deg.dat
+    inPathSfcTyp_1deg = ['./']; 
+    %inPathSfcTyp_1deg   = ['/data/crash/wchen/MODIS/ShortWave/Input/Aux/'];
+
+    %-----not changed 
+    inPath16DayAlb_1deg = ['/aosc/ceop/ceop1/xiaolei/backup_hwang/',...
+                          'srb7_hwang_Data/Data/albedo/'];%Alternative '/data/srb1/wchen/WORK/MODIS/SRB_SW/case_5km_cp_run/albedo16d/'
+    inPathSnowAlb = ['/homes/metogra/ytma/modisSnow/'];%Not done yet&Not used
+
+    %-----pth of daily snow                 
+    %inPathDailySnow = ['/data/pkgroup2/xiaolei/Level3/snow_ice/']; % 2002..2010
+    %inPathDailySnow = ['/aosc/ceop/Data/daily_snow/']; % 2011..2013
+    %inPathDailySnow   = ['/data/crash/wchen/MODIS/ShortWave/Input/Daily_Snow/']; % 2002-2014 contains symbol links
+    inPathDailySnow   = ['/data/srb4/wchen/MODIS/']%2015-2019
+    %-----pth of weekly snow 
+    %inPath8DaySnow = ['/aosc/ceop/Data/Weekly_Snow/']; %2003..2005,2009..2013
+    %inPath8DaySnow    = ['/data/crash/wchen/MODIS/ShortWave/Input/Weekly_Snow/'];%2002-2014 contains symbol links
+    inPath8DaySnow    = ['/data/srb4/wchen/MODIS/'];%2015-2019
+    %-----pth of seaice
+    %inPathSeaIce = ['/aosc/ceop/Data/seaice/'];%upto 1978..2013; No 2011 data from their website.
+    %inPathSeaIce      = ['/data/crash/wchen/MODIS/ShortWave/Input/seaice/'];% 1978..2014;contains symbol links
+     inPathSeaIce      = ['/data/srb4/wchen/seaice/'];% 1978..2014;contains symbol links
+   
+     resultPath0 = [prepOutPath, 'albedo/'];
+     First = true;
+ %==========================================================================
+
+
+   %-- save the source code for documentary purpose.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+   %-- get surface type information.
+   %   IGBP_Land_Cover_Type
+   %   for  5km: 8-bit integer,    10800 x 21600
+   %   for 1deg: single float.
+   %        0  water = 0
+   %        1  evergreen needleleaf forest = 1
+   %        2  evergreen broadleaf forest = 2
+   %        3  deciduous needleleaf forest = 3
+   %        4  deciduous broadleaf forest = 4
+   %        5  mixed forests = 5
+   %        6  closed shrubland = 6
+   %        7  open shrublands = 7
+   %        8  woody savannas = 8
+   %        9  savannas = 9
+   %        10 grasslands = 10
+   %        11 permanent wetlands = 11
+   %        12 croplands = 12
+   %        13 urban and built-up = 13
+   %        14 cropland/natural vegetation mosaic = 14
+   %        15 snow and ice = 15
+   %        16 barren or sparsely vegetated = 16
+   %        17 unclassified = -2
+   %
+   if gridRes==0.05
+      read_surface_type = @read_surface_type_5km; %int8 type
+      inPathSfcTyp = inPathSfcTyp_5km;
+   elseif gridRes==1.0
+      read_surface_type = @read_surface_type_1deg; %single float
+      inPathSfcTyp = inPathSfcTyp_1deg;
+   end
+   [sfcTyp, sfcTypRes, sfcTypLat1, sfcTypLon1] = ...
+                           read_surface_type( inPathSfcTyp );
+   
+   
+   %--
+   %
+   for satName = {'NaN'} %Use a same albedo value for both Terra and Aqua.
+         
+      %if     strcmp(satName,'terra') satStr='MOD';
+      %elseif strcmp(satName,'aqua')  satStr='MYD';
+      %end
+
+      crntYrmon = -1;
+      crntYr = -1; % timeV need to be monotonicly ordered!
+      
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+         if iyr~=crntYr
+            crntD16 = -1;
+            crntD8  = -1;
+            crntYr = iyr;      
+         end      
+      
+         disp(sprintf('prep albedo... %04d/%02d/%02d (%03d)',iyr,imon,idy,doy))
+
+
+         %----- get MODIS 16day albedo, snow-free land only.
+         %   assume 001.dat covers 001 to 016.
+         %   data is multi-year mean over 00-04.  
+         %   for  5km: [7200,3600]=[NX,NY], single pricision
+         %   for 1deg: single pricision
+         %
+         d16 = fix((doy-1)/16)*16+1;
+         if d16 ~= crntD16
+
+            if gridRes==0.05
+               read_modis_16day_albedo = @read_modis_16day_albedo_5km;
+               inPath16DayAlb = inPath16DayAlb_5km;
+            elseif gridRes==1.0
+               read_modis_16day_albedo = @read_modis_16day_albedo_1deg;
+               inPath16DayAlb = inPath16DayAlb_1deg;
+            end
+
+
+            [alb16bsVis,...
+             alb16bsNir,...
+             alb16wsVis,...
+             alb16wsNir...
+             alb16Res, alb16Lat1, alb16Lon1] =...
+                  read_modis_16day_albedo( d16, inPath16DayAlb );
+
+            if alb16Res  ~= sfcTypRes  ||...
+               alb16Lat1 ~= sfcTypLat1 ||...
+               alb16Lon1 ~= sfcTypLon1
+            
+               disp('--- prep_albedo(): sfcTyp and alb16 dont match!')
+               keyboard
+            end
+
+            %crntD16 = d16; crntD16 need to keep its value till the end of the loop.
+         end %if d16 ~= crntD16
+         
+
+         %----- get MODIS daily snow "MYD10C1" data. 
+         %   daily land snow
+         %   for  5km: 0.05deg. [7200,3600]=[NX,NY], single pricesion
+         %   for 1deg: 
+         %   snow fraction in 100%
+         %   The daySnow may return [] array.
+         %
+         satName = 'terra';
+         [daySnowTerra, ...
+          daySnowRes, ...
+          daySnowLat1, ...
+          daySnowLon1] = read_modis_daily_snow(...
+                              iyr, imon, idy, doy,...
+                              satName, inPathDailySnow, gridRes );
+         
+         if daySnowRes  ~= sfcTypRes  ||...
+            daySnowLat1 ~= sfcTypLat1 ||...
+            daySnowLon1 ~= sfcTypLon1
+            
+            disp(sprintf('--- %s: sfcTyp and daySnow dont match!',mfilename))
+            keyboard
+         end
+
+
+         %----- get MODIS daily snow "MOD10C1" data. 
+         %   daily land snow
+         %   for  5km: 0.05deg. [7200,3600]=[NX,NY], single pricesion
+         %   for 1deg: 
+         %   snow fraction in 100%
+         %   The day8Snow may return [] array.
+         %
+         satName = 'aqua';
+         [daySnowAqua, ...
+          daySnowRes, ...
+          daySnowLat1, ...
+          daySnowLon1] = read_modis_daily_snow(...
+                              iyr, imon, idy, doy,...
+                              satName, inPathDailySnow, gridRes );
+         
+         if daySnowRes  ~= sfcTypRes  ||...
+            daySnowLat1 ~= sfcTypLat1 ||...
+            daySnowLon1 ~= sfcTypLon1
+            
+            disp('--- prep_albedo(): sfcTyp and daySnow dont match!')
+            keyboard
+         end
+
+
+
+         %----- get MODIS 8-day snow "MYD10C2.5" and "MOD10C2.5" data
+         %   8-day land snow
+         %   for  5km: 0.05 deg. [7200,3600]=[NX,NY], single pricesion
+         %   for 1deg:
+         %   snow fraction in 100%
+         %   The day8Snow may return [] array.
+         %
+         d8 = fix((doy-1)/8)*8+1;
+         if d8 ~= crntD8
+
+            satName = 'terra';
+            [day8SnowTerra, ...
+             day8SnowRes, ...
+             day8SnowLat1, ...
+             day8SnowLon1] = read_modis_8day_snow(...
+                             iyr, d8, satName, inPath8DaySnow, gridRes );
+
+            satName = 'aqua';
+            [day8SnowAqua, ...
+             day8SnowRes, ...
+             day8SnowLat1, ...
+             day8SnowLon1] = read_modis_8day_snow(...
+                             iyr, d8, satName, inPath8DaySnow, gridRes );
+
+             crntD8 = d8;
+         end
+
+         if day8SnowRes  ~= sfcTypRes  ||...
+            day8SnowLat1 ~= sfcTypLat1 ||...
+            day8SnowLon1 ~= sfcTypLon1
+            
+            disp(sprintf('--- %s: sfcTyp and day8Snow dont match!',mfilename))
+            keyboard
+         end
+
+
+
+         %----- assume default snow cover is the 8-day snow,
+         %      if daily values are available, replace the 
+         %      default 8-day values with the daily values.
+         %
+         if ~isempty(daySnowTerra) && ~isempty(daySnowAqua)
+            dSnow = cat( 3, daySnowTerra,daySnowAqua );
+            dSnow = nanmean( dSnow, 3 );
+         elseif ~isempty(daySnowTerra)
+                 dSnow = daySnowTerra;
+         elseif ~isempty(daySnowAqua)
+                 dSnow = daySnowAqua;
+         else
+            dSnow = [];
+         end
+
+
+         if ~isempty(day8SnowTerra) && ~isempty(day8SnowAqua)
+            d8Snow = cat( 3, day8SnowTerra,day8SnowAqua );
+            d8Snow = nanmean( d8Snow, 3 );
+         elseif ~isempty(day8SnowTerra)
+                d8Snow = day8SnowTerra;
+         elseif ~isempty(day8SnowAqua)
+                d8Snow = day8SnowAqua;
+         else
+            d8Snow = [];
+         end
+
+
+         if ~isempty(dSnow) && ~isempty(d8Snow)
+            daySnow = d8Snow;
+            sb = dSnow>0;
+            daySnow( sb ) = dSnow( sb );
+         elseif ~isempty(dSnow)
+               daySnow = dSnow;
+         elseif ~isempty(d8Snow)
+               daySnow = d8Snow;
+         else
+            daySnow = [];
+            disp('---prep_albedo(): daySnow is empty!')
+            keyboard
+         end
+         
+         
+%keyboard
+%return
+%test
+%130129: snow albedo part is not yet done.
+%{
+         %----- get MODIS daily snow ALBEDO "MOD10A1" data. 
+         %   daily land snow albedo
+         %   for  5km: 0.05deg. [7200,3600]=[NX,NY], single pricesion
+         %   for 1deg:
+         %
+         satName = 'terra';
+         [daySnowAlbAqua, ...
+          daySnowAlbRes, ...
+          daySnowAlbLat1, ...
+          daySnowAlbLon1] = read_modis_daily_snowAlb(...
+                            iyr, imon, idy, doy,...
+                            satName, inPathSnowAlb, gridRes);
+         
+         if daySnowAlbRes  ~= sfcTypRes  ||...
+            daySnowAlbLat1 ~= sfcTypLat1 ||...
+            daySnowAlbLon1 ~= sfcTypLon1
+            
+            disp('--- prep_albedo(): sfcTyp and daySnowAlb dont match!')
+            keyboard
+         end
+
+continue
+keyboard
+return
+%}
+%==========================================================================
+
+%130129: 2011,2012 seaice data are not available on NIDC website;
+%160606: seaice data are updated to 2015 and the version has updated to v1.1
+if iyr>=2021
+         disp(sprintf('--- Sea ice data is missing'));
+         dayIce = nan(size(sfcTyp));
+         dayIceRes = sfcTypRes;
+         dayIceLat1 = sfcTypLat1;
+         dayIceLon1 = sfcTypLon1;
+else
+
+         %----- read DAILY sea ice data 
+         % ice concentration in 100%
+         % idy=99 read monthly data
+         % for  5km: single precision, 0.05 deg. [7200,3600]=[NX,NY]
+         % for 1deg:
+         %
+         [dayIce, ...
+          dayIceRes, ...
+          dayIceLat1, ...
+          dayIceLon1] = read_seaice(...
+                        iyr, imon, idy, doy, inPathSeaIce, gridRes );
+         
+         if dayIceRes  ~= sfcTypRes  ||...
+            dayIceLat1 ~= sfcTypLat1 ||...
+            dayIceLon1 ~= sfcTypLon1
+            
+            disp(sprintf('--- %s: sfcTyp and dayIce dont match!',mfilename))
+            keyboard
+         end
+
+
+         
+         %----- read MONTHLY sea ice data 
+         % ice concentration in 100%
+         % idy=99 read monthly data
+         % single precision, 0.05 deg. [7200,3600]=[NX,NY]
+         %
+         yrmon = iyr*100 + imon;
+         if yrmon ~= crntYrmon
+            
+            [monIce, ...
+             monIceRes, ...
+             monIceLat1, ...
+             monIceLon1] = read_seaice(...
+                           iyr, imon, 99, doy, inPathSeaIce, gridRes );
+         
+            if monIceRes  ~= sfcTypRes  ||...
+               monIceLat1 ~= sfcTypLat1 ||...
+               monIceLon1 ~= sfcTypLon1
+            
+               disp(sprintf('--- %s: sfcTyp and monSnow dont match!',mfilename))
+               keyboard
+            end
+            
+            crntYrmon = yrmon;
+         end
+         
+
+         %----- Fill missing daily seaice with monthly seaice
+         %
+         sb = isnan(dayIce);
+         dayIce(sb) = monIce(sb);
+end         
+%}
+%==========================================================================
+
+%keyboard
+%return
+
+         %----- adjust surface albedo for snow covered region.
+         % Since albedo calculation need mu0 as input, this 
+         % is not doable at this step.
+
+
+
+         %-- output surface type data. write once only.
+         if First
+            outFileName = [resultPath0, 'sfctyp.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(sfcTyp), 'int32');
+               fwrite(fid, size(sfcTyp),  'int32');
+               fwrite(fid, sfcTypRes,  'float32');
+               fwrite(fid, sfcTypLat1, 'float32');
+               fwrite(fid, sfcTypLon1, 'float32');
+               fwrite(fid, sfcTyp, 'int8');
+            fclose(fid);
+            First = false;
+         end
+
+         resultPath = [resultPath0, yyyy,'/'];
+         
+         %-- output 16day albedo data
+         if d16 ~= crntD16
+            outFileName = [resultPath,...
+                           'alb16.',yyyy,num2str(d16,'%03d'),'.dat'];
+            fid = fopen(outFileName,'w');
+               fwrite(fid, ndims(alb16bsVis), 'int32');
+               fwrite(fid, size(alb16bsVis),  'int32');
+               fwrite(fid, alb16Res,  'float32');
+               fwrite(fid, alb16Lat1, 'float32');
+               fwrite(fid, alb16Lon1, 'float32');
+               fwrite(fid, alb16bsVis,  'float32');
+               fwrite(fid, alb16bsNir,  'float32');
+               fwrite(fid, alb16wsVis,  'float32');
+               fwrite(fid, alb16wsNir,  'float32');
+            fclose(fid);
+         end
+
+         %-- output daily snow data.
+         %outFileName = [resultPath,...
+         %               'snow.',satName,'.',yyyy,ddd,'.dat'];
+         outFileName = [resultPath,...
+                        'snow.comb.',yyyy,ddd,'.dat'];
+         fid = fopen(outFileName,'w');
+            fwrite(fid, ndims(daySnow), 'int32');
+            fwrite(fid, size(daySnow),  'int32');
+            fwrite(fid, daySnowRes,  'float32');
+            fwrite(fid, daySnowLat1, 'float32');
+            fwrite(fid, daySnowLon1, 'float32');
+            fwrite(fid, daySnow, 'float32');
+         fclose(fid);
+
+
+         %-- output daily seaice data.
+         outFileName = [resultPath,...
+                        'seaice.',yyyy,ddd,'.dat'];
+         fid = fopen(outFileName,'w');
+            fwrite(fid, ndims(dayIce), 'int32');
+            fwrite(fid, size(dayIce),  'int32');
+            fwrite(fid, dayIceRes,  'float32');
+            fwrite(fid, dayIceLat1, 'float32');
+            fwrite(fid, dayIceLon1, 'float32');
+            fwrite(fid, dayIce, 'float32');
+         fclose(fid);
+
+
+         if d16 ~= crntD16
+            crntD16 = d16;
+         end
+               
+      end %--for atv = timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function [alb16bsVis,alb16bsNir,alb16wsVis,alb16wsNir...
+          alb16Res, alb16Lat1, alb16Lon1] =...
+         read_modis_16day_albedo_5km( d16, inPath16DayAlb )
+%----------------------------------------------------------------------
+
+   smpStp = 3; %0.05deg
+   smp1   = round(smpStp/2);
+   
+   origRes = 1/60;
+   alb16Res = origRes*smpStp; %original res.=1minute, in degree.
+   alb16Lat1 = 90-origRes/2-(smp1-1)*origRes; %90-alb16Res/2;
+   alb16Lon1 = -180+origRes/2+(smp1-1)*origRes; %-180+alb16Res/2;
+   
+   %yyyy = num2str(2007, '%4.4d');
+   ddd  = num2str(d16, '%3.3d');
+
+   %--
+   % Albedo_Map_0.3_0.7 (720, 4)
+   % 16-bit integer,    10800 x 21600
+   % Number of attributes = 7
+   %     valid_range = 0,32766
+   %     _FillValue = 32767
+   %     long_name = Albedo Maps derived from MOD43B3 data.
+   %     units = none
+   %     scale_factor = 0.0010
+   %     add_offset = 0.0
+   %     Parameter_Type = MODIS/MAS input
+   %
+   alb16Path0 = inPath16DayAlb;
+
+   bsVisPath = [alb16Path0,'0.3_0.7.um.00-04.BS.c004.v2.0/'];
+   bsNirPath = [alb16Path0,'0.7_5.0.um.00-04.BS.c004.v2.0/'];
+   wsVisPath = [alb16Path0,'0.3_0.7.um.00-04.WS.c004.v2.0/'];
+   wsNirPath = [alb16Path0,'0.7_5.0.um.00-04.WS.c004.v2.0/'];
+
+   odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+
+   fullName = [bsVisPath,'AlbMap.BS.c004.v2.0.00-04.',ddd,'.0.3_0.7.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+   alb16bsVis = obtain_hdf_datafield(hdfID, 'Albedo_Map_0.3_0.7', 'doScl','doNaN');
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   alb16bsVis = alb16bsVis(smp1:smpStp:end, smp1:smpStp:end);
+      
+   fullName = [bsNirPath,'AlbMap.BS.c004.v2.0.00-04.',ddd,'.0.7_5.0.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+   alb16bsNir = obtain_hdf_datafield(hdfID, 'Albedo_Map_0.7_5.0','doScl','doNaN');
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   alb16bsNir = alb16bsNir(smp1:smpStp:end, smp1:smpStp:end);
+   
+   fullName = [wsVisPath,'AlbMap.WS.c004.v2.0.00-04.',ddd,'.0.3_0.7.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+   alb16wsVis = obtain_hdf_datafield(hdfID, 'Albedo_Map_0.3_0.7','doScl','doNaN');
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   alb16wsVis = alb16wsVis(smp1:smpStp:end, smp1:smpStp:end);
+
+   fullName = [wsNirPath,'AlbMap.WS.c004.v2.0.00-04.',ddd,'.0.7_5.0.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+   alb16wsNir = obtain_hdf_datafield(hdfID, 'Albedo_Map_0.7_5.0','doScl','doNaN');
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   alb16wsNir = alb16wsNir(smp1:smpStp:end, smp1:smpStp:end);
+   
+   %all data are in single pricesion.
+   
+   cd(odir);
+
+
+%   %--- average downscal
+%   %
+%   boxLen = daySnowRes/origRes; %=20
+%   NoY = 180/origRes; %=3600;
+%   NoX = 360/origRes; %7200;
+%   
+%   if boxLen ~=1
+%      z = reshape(daySnow, [boxLen,NoX/boxLen,boxLen,NoY/boxLen]);
+%      z = permute(z,[1,3,2,4]);
+%      z = reshape(z,[boxLen*boxLen, NoX/boxLen, NoY/boxLen]);
+%      z = squeeze(nanmean(z,1));
+%   end
+
+   
+%keyboard
+end
+
+
+%----------------------------------------------------------------------
+function [alb16bsVis,alb16bsNir,alb16wsVis,alb16wsNir...
+          alb16Res, alb16Lat1, alb16Lon1] =...
+         read_modis_16day_albedo_1deg( d16, inPath16DayAlb )
+%----------------------------------------------------------------------
+
+   alb16Res  = 1; % 1 deg data.
+   alb16Lat1 = 90-alb16Res/2;
+   alb16Lon1 = -180+alb16Res/2;
+   albNLats = 180;
+   albNLons = 360;
+
+
+   %AlbBoxStats.FM.c004.v2.0.BS.1x1D.00-04.049.hdf (0, 0)
+   % Group size = 4
+   % Number of attributes = 42
+   %     Creation_Date = 04/12/2005
+   %     This_file_original_name = /albedo/moody/EcoAlb/Statistical/AlbedoBoxStatistics.FilledMaps/AlbBoxStats.FilledMaps//00-04.049/AlbBoxStats.FM.c004.v2.0.BS.1x1D.00-04.049.hdf
+   %     This_file_albedo_type = Albedo Statistics of Filled Black Sky Albedo Maps.
+   %     Wavelength_Order_1 = 0.47
+   %     Wavelength_Order_2 = 0.555
+   %     Wavelength_Order_3 = 0.659
+   %     Wavelength_Order_4 = 0.858
+   %     Wavelength_Order_5 = 1.24
+   %     Wavelength_Order_6 = 1.64
+   %     Wavelength_Order_7 = 2.13
+   %     Wavelength_Order_8 = 0.3_0.7
+   %     Wavelength_Order_9 = 0.7_5.0
+   %     Wavelength_Order_10 = 0.3_5.0
+
+   %yyyy = num2str(2007, '%4.4d');
+   ddd  = num2str(d16, '%3.3d');
+
+   alb16Path0 = inPath16DayAlb;
+
+   bsPath = [alb16Path0,'AlbBoxStats.1x1D.00-04.BS.c004.v2.0/'];
+   wsPath = [alb16Path0,'AlbBoxStats.1x1D.00-04.WS.c004.v2.0/'];
+
+
+   fullName = [bsPath,'AlbBoxStats.FM.c004.v2.0.BS.1x1D.00-04.',ddd,'.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+      odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      alb16bs = obtain_hdf_datafield(hdfID, 'Albedo_Box_Mean', 'doScl','doNaN');
+      cd(odir);
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+   fullName = [wsPath,'AlbBoxStats.FM.c004.v2.0.WS.1x1D.00-04.',ddd,'.hdf'];
+   hdfID = hdfsd('start',fullName,'read');
+      odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      alb16ws = obtain_hdf_datafield(hdfID, 'Albedo_Box_Mean', 'doScl','doNaN');
+      cd(odir);
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+
+   alb16bsVis = squeeze(alb16bs(8,:,:));
+   alb16bsNir = squeeze(alb16bs(9,:,:));
+   alb16wsVis = squeeze(alb16ws(8,:,:));
+   alb16wsNir = squeeze(alb16ws(9,:,:));
+      
+   %all data are in single pricesion.
+   
+%keyboard
+end
+   
+
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function [daySnow, daySnowRes, daySnowLat1, daySnowLon1] =...
+         read_modis_daily_snow(year, month, day, doy, satName,...
+         inPathDailySnow, gridRes)
+%----------------------------------------------------------------------
+
+
+   origRes = 0.05; %original MODC1 data resoluton.
+   if     gridRes==0.05; daySnowRes = 0.05; %0.05deg
+   elseif gridRes==1.0;  daySnowRes = 1.0; end %1.0deg
+   daySnowLat1 = 90-daySnowRes/2;
+   daySnowLon1 = -180+daySnowRes/2;
+   
+   yyyy = num2str(year, '%4.4d');
+   ddd  = num2str(doy, '%3.3d');
+
+
+   %-- missing data files
+   missStr = lower([satName,yyyy,ddd]);
+   if ismember( missStr, {...
+                           'aqua2002220',...
+                           'aqua2002256',...
+                           'terra2003351',...
+                           'terra2003352',...
+                           'terra2003353',...
+                           'terra2003354',...
+                           'terra2003355',...
+                           'terra2003356',...
+                           'terra2003357',...
+                           'terra2005046',...
+                           'terra2008356',...
+                           'terra2008357',...
+                           'aqua2011175',...
+                           'aqua2002182',...
+                           'aqua2002183',...
+                           'aqua2002184',...
+                           'aqua2002211',...
+                           'aqua2002212',...
+                           'aqua2002213',...
+                           'aqua2002214',...
+                           'aqua2002215',...
+                           'aqua2002216',...
+                           'aqua2002217',...
+                           'aqua2002218',...
+                           'aqua2002219',...
+                           'terra2016050',...
+                           'terra2016051',...
+                           'terra2016052',...
+                           'terra2016053',...
+                           'terra2016054',...
+                           'terra2016055',...
+                           'terra2016056',...
+                           'terra2016057',...
+                           'terra2016058',...
+                          })
+   
+      daySnow = [];
+      return
+   end
+
+
+
+   daySnowPath = inPathDailySnow; %upto 2012
+
+   if     strcmp(satName,'terra') satStr='MOD'; 
+   elseif strcmp(satName,'aqua' ) satStr='MYD'; end
+   
+   fptn = [daySnowPath,'/',satStr,'10C1/',satStr,'10C1.A',yyyy,ddd,'.*.hdf'];
+   flist = dir(fptn);
+   if (length(flist)>1)
+      disp(sprintf('--- %s: multi snow files!',mfilename))
+      keyboard
+   end
+   if (length(flist)==0)
+      disp(sprintf('--- %s: snow file is missing! fptn=%s',mfilename,fptn))
+      keyboard
+   end
+
+   %-- read MODIS daily snow 
+   %     Day_CMG_Snow_Cover (720, 5)
+   %     8-bit unsigned integer,    3600 x 7200
+   %     Number of attributes = 12
+   %     long_name = Daily snow extent, global at 5km
+   %     units = none
+   %     format = I3
+   %     coordsys = latitude, longitude
+   %     valid_range = 0,100
+   %     _FillValue = 255
+   %     Mask_value = 254
+   %     Night_value = 111
+   %     Cell_resolution = 0.05 deg
+   %     Water_mask_land_threshold (%) = 12.0
+   %     Antarctica_snow_note = Antarctica deliberately mapped as snow
+   %     Key = 0-100=percent of snow in cell, 
+   %             107=lake ice, 
+   %             111=night, 
+   %             250=cloud obscured water, 
+   %             253=data not mapped, 
+   %             254=water mask, 
+   %             255=fill
+   %      
+   fullName = [daySnowPath,satStr,'10C1/',flist.name];
+   disp(fullName)
+   hdfID = hdfsd('start',fullName,'read');
+      odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      [daySnow] = obtain_hdf_datafield(...
+                  hdfID, 'Day_CMG_Snow_Cover','',''); %in uint8.
+      cd(odir);
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   
+   daySnow = single(daySnow);
+
+   daySnow( daySnow==107 ) = 100; %lake ice set to 100% snow
+   daySnow( daySnow==111 |...
+            daySnow==250 |...
+            daySnow==253 |...
+            daySnow==254 |...
+            daySnow==255 ) = NaN;      
+
+   
+   if gridRes == 1.0
+
+      %--- sampling downscal
+      %z= daySnow(10:20:end, 10:20:end);
+      
+      %--- average downscal
+      %
+      boxLen = daySnowRes/origRes; %=20
+      NoY = 180/origRes; %=3600;
+      NoX = 360/origRes; %7200;
+   
+      if boxLen ~=1
+         z = reshape(daySnow, [boxLen,NoX/boxLen,boxLen,NoY/boxLen]);
+         z = permute(z,[1,3,2,4]);
+         z = reshape(z,[boxLen*boxLen, NoX/boxLen, NoY/boxLen]);
+         z = squeeze(nanmean(z,1));
+      end
+   
+      daySnow = z;
+
+   end
+   
+%keyboard
+end
+
+
+
+
+
+%----------------------------------------------------------------------
+function [day8Snow, day8SnowRes, day8SnowLat1, day8SnowLon1] =...
+         read_modis_8day_snow(year, day8, satName,...
+         inPath8DaySnow, gridRes)
+%----------------------------------------------------------------------
+
+
+   origRes = 0.05; %original MODC1 data resoluton.
+   if     gridRes==0.05; day8SnowRes = 0.05; %0.05deg
+   elseif gridRes==1.0;  day8SnowRes = 1.0; end %1.0deg
+   day8SnowLat1 = 90-day8SnowRes/2;
+   day8SnowLon1 = -180+day8SnowRes/2;
+   
+   yyyy = num2str(year, '%04d');
+   ddd  = num2str(day8, '%03d');
+
+
+   %-- missing data files
+   missStr = lower([satName,yyyy,ddd]);
+   if ismember( missStr, {...
+                           'terra2004065',...
+                           'terra2016049',...
+                           'terra2017001',...
+                           'aqua2017001',...
+                           'aqua2019233',...
+                           'aqua2002177',...
+                         })
+   
+      day8Snow = [];
+      return
+   end
+
+
+   day8SnowPath = inPath8DaySnow; %upto 2012.201
+
+   if     strcmp(satName,'terra') satStr='MOD'; 
+   elseif strcmp(satName,'aqua' ) satStr='MYD'; end
+   
+   fptn = [day8SnowPath,satStr,'10C2/',satStr,'10C2.A',yyyy,ddd,'.*.hdf'];
+   flist = dir(fptn);
+   if (length(flist)>1)
+      disp('--- read_modis_8day_snow(): multi snow files!')
+      keyboard
+   end
+   if (length(flist)==0)
+      disp(sprintf('--- %s: 8day snow file is missing! fptn=%s',mfilename,fptn))
+      keyboard
+   end
+
+   %-- read MODIS 8-day snow 
+   %   Eight_Day_CMG_Snow_Cover (720, 5)
+   %   8-bit unsigned integer,    3600 x 7200
+   %   Number of attributes = 11
+   %   long_name = Eight day snow cover extent, 5km
+   %   units = none
+   %   format = I3
+   %   coordsys = latitude, longitude
+   %   valid_range = 0,100
+   %   _FillValue = 255
+   %   Mask_value = 254
+   %   Night_value = 111
+   %   Water_mask_land_threshold (%) = 12.0
+   %   Antarctica_snow_note = Antarctica deliberately mapped as snow
+   %   Key = 0-100=percent of snow in a cell, 
+   %           107=lake ice,
+   %           111=night,
+   %           237=inland water,
+   %           250=cloud obscured water,
+   %           253=data not mapped,
+   %           254=water mask,
+   %           255=fill
+   %      
+   fullName = [day8SnowPath,satStr,'10C2/',flist.name];
+   hdfID = hdfsd('start',fullName,'read');
+      odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+      [day8Snow] = obtain_hdf_datafield(...
+                  hdfID, 'Eight_Day_CMG_Snow_Cover','',''); %in uint8.
+      cd(odir);
+   sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+   
+   day8Snow = single(day8Snow);
+
+   day8Snow( day8Snow==107 ) = 100; %lake ice set to 100% snow
+   day8Snow( day8Snow==111 |...
+             day8Snow==237 |...
+             day8Snow==250 |...
+             day8Snow==253 |...
+             day8Snow==254 |...
+             day8Snow==255 ) = NaN;      
+
+
+   %--- regrid to 1deg, if 1deg version.
+   if gridRes == 1.0
+
+      %--- sampling downscal
+      %z= day8Snow(10:20:end, 10:20:end);
+      
+      %--- average downscal
+      %
+      boxLen = day8SnowRes/origRes; %=20
+      NoY = 180/origRes; %=3600;
+      NoX = 360/origRes; %7200;
+   
+      if boxLen ~=1
+         z = reshape(day8Snow, [boxLen,NoX/boxLen,boxLen,NoY/boxLen]);
+         z = permute(z,[1,3,2,4]);
+         z = reshape(z,[boxLen*boxLen, NoX/boxLen, NoY/boxLen]);
+         z = squeeze(nanmean(z,1));
+      end
+   
+      day8Snow = z;
+
+   end
+   
+%keyboard
+end
+
+
+
+
+%----------------------------------------------------------------------
+function [daySnowAlb, daySnowAlbRes, daySnowAlbLat1, daySnowAlbLon1] =...
+         read_modis_daily_snowAlb(year, month, day, doy, satName, ...
+         inPathSnowAlb, gridRes )
+%----------------------------------------------------------------------
+
+
+   origRes = 0.05; %original MODC1 data resoluton.
+   if     gridRes==0.05; daySnowAlbRes = 0.05; %0.05deg
+   elseif gridRes==1.0;  daySnowAlbRes = 1.0; end %1.0deg
+   daySnowAlbLat1 = 90-daySnowAlbRes/2;
+   daySnowAlbLon1 = -180+daySnowAlbRes/2;
+   
+   numLon = 360/daySnowAlbRes; %7200
+   numLat = 180/daySnowAlbRes; %3600
+   daySnowAlb = nan(numLon,numLat); %[7200,3600]
+   
+   yyyy = num2str(year, '%4.4d');
+   ddd  = num2str(doy, '%3.3d');
+
+
+   %daySnowAlbPath = ['/data/pkgroup2/xiaolei/Level3/snow_ice/'];
+   daySnowAlbPath = inPathSnowAlb;
+
+   if     strcmp(satName,'terra') satStr='MOD'; 
+   elseif strcmp(satName,'aqua' ) satStr='MYD'; end
+   
+   %fptn = [daySnowAlbPath,satStr,'10C1/',satStr,'10A1.A',yyyy,ddd,'.*.hdf'];
+   fptn = [daySnowAlbPath,'/',satStr,'10A1.A',yyyy,ddd,'.*.hdf'];
+   flist = dir(fptn);
+   if (length(flist)==0)
+      disp(sprintf('--- read_modis_daily_snowAlb(): data file not available, %s', fptn))
+      daySnowAlb=[];
+      return
+   end
+
+   %-- read MODIS daily snow ALBEDO
+   %   Snow_Albedo_Daily_Tile (720, 9)
+   %   8-bit unsigned integer,    2400 x 2400
+   %     long_name = Snow albedo of the corresponding snow cover observation
+   %     units = none
+   %     format = I3
+   %     coordsys = cartesian
+   %     valid_range = 0,100
+   %     _FillValue = 255
+   %     missing_value = -6
+   %     Key = 0-100=snow albedo, 
+   %             101=no_decision, 
+   %             111=night, 
+   %             125=land, 
+   %             137=inland water, 
+   %             139=ocean, 
+   %             150=cloud, 
+   %             250=missing, 
+   %             251=self_shadowing, 
+   %             252=landmask mismatch, 
+   %             253=BRDF_failure, 
+   %             254=non-production_mask
+   %      
+   for ifl = 1:length(flist)
+
+      fullName = [daySnowAlbPath,'/',flist(ifl).name]
+      hdfID = hdfsd('start',fullName,'read');
+         odir=cd('/aosc/ceop/ytma/dev2/MODIS/mlib/');
+         [tileM] = obtain_hdf_datafield(...
+                   hdfID, 'Snow_Albedo_Daily_Tile','',''); %in uint8.
+         cd(odir);
+      sts = hdfsd( 'end',hdfID ); %need for WRITTING.
+
+      px = tileM<=100; %need only valid snow albedo pixels.
+
+
+   stnLatLon(stnLatLon(:,2)>180, 2) = ...
+             stnLatLon(stnLatLon(:,2)>180, 2) - 360; % Lon = -180 ~ +180.
+
+   stnIJ = [round((stnLatLon(:,1)-latBegin)./dLL + 1),...
+            round((stnLatLon(:,2)-lonBegin)./dLL + 1)];
+   stnIdx = sub2ind([NoY,NoX], stnIJ(:,1), stnIJ(:,2)); 
+
+%/// not yet done 121015         
+%      daySnowAlb = single(daySnowAlb);
+keyboard
+   
+   end
+
+return
+
+   daySnowAlb( daySnow==107 ) = 100; %lake ice set to 100% snow
+   daySnowAlb( daySnow==111 |...
+               daySnow==250 |...
+               daySnow==253 |...
+               daySnow==254 |...
+               daySnow==255 ) = NaN;      
+
+   
+%keyboard
+end
+
+
+
+
+
+
+
+%----------------------------------------------------------------------
+function [dmIce, dmIceRes, dmIceLat1, dmIceLon1] =...
+         read_seaice(year, month, day, doy, inPathSeaIce, gridRes)
+%----------------------------------------------------------------------
+% Sea Ice Concentrations from Nimbus-7 SMMR and DMSP SSM/I-SSMIS Passive Microwave Data
+% NSIDC-0051, http://nsidc.org/data/docs/daac/nsidc0051_gsfc_seaice.gd.html
+%
+% Spatial Coordinates:
+%     N: -39.23�     S: -90�     E: 180�     W: -180�     
+%     N: 90�     S: 30.98�     E: 180�     W: -180�   
+%
+% Data Resolution
+%     Latitude Resolution: 25 km
+%     Longitude Resolution: 25 km
+%     Temporal Resolution: Daily
+%
+%     Latitude Resolution: 25 km
+%     Longitude Resolution: 25 km
+%     Temporal Resolution: Every other day
+%
+%     Latitude Resolution: 25 km
+%     Longitude Resolution: 25 km
+%     Temporal Resolution: Monthly
+%
+%Table 1. File Header Description
+%Bytes	Description
+%1-6	   Missing data integer value
+%7-12	   Number of columns in polar stereographic grid
+%13-18	Number of rows in polar stereographic grid
+%19-24	Unused/internal
+%25-30	Latitude enclosed by polar stereographic grid
+%31-36	Greenwich orientation of polar stereographic grid
+%37-42	Unused/internal
+%43-48	J-coordinate of the grid intersection at the pole
+%49-54	I-coordinate of the grid intersection at the pole
+%55-60	Five-character instrument descriptor (SMMR, SSM/I)
+%61-66	Two descriptors of two characters each that describe the data; 
+%        (for example, 07 cn = Nimbus-7 ice concentration)
+%67-72	Starting Julian day of grid data
+%73-78	Starting hour of grid data (if available)
+%79-84	Starting minute of grid data (if available)
+%85-90	Ending Julian day of grid data
+%91-96	Ending hour of grid data (if available)
+%97-102	Ending minute of grid data (if available)
+%103-108	Year of grid data
+%109-114	Julian day of grid data
+%115-120	Three-digit channel descriptor (000 for ice concentrations)
+%121-126	Integer scaling factor
+%127-150	24-character file name
+%151-230	80-character image title
+%231-300	70-character data information (creation date, data source, etc.)
+
+% if (hemisphere eq 1) then begin
+%    xdim = 304
+%    ydim = 448
+% endif else if (hemisphere eq 2) then begin
+%    xdim = 316
+%    ydim = 332
+%
+%Table 5. Description of Data Values
+%Data Value	Meaning
+%0 - 250	Sea ice concentration (fractional coverage scaled by 250)
+%251	   Circular mask used in the Arctic to cover the irregularly-shaped data gap around the pole (caused by the orbit inclination and instrument swath)
+%252	   Unused
+%253	   Coastlines
+%254	   Superimposed land mask
+%255	   Missing data
+%
+   persistent First
+   persistent northSub southSub
+   
+   if isempty(First)
+      First=true;
+   end
+
+   %--
+   origRes  = 0.05; %original MODC1 data resoluton.
+   origLat1 = 90-origRes/2;
+   origLon1 = -180+origRes/2;
+   
+   if     gridRes==0.05; dmIceRes = 0.05; %0.05deg
+   elseif gridRes==1.0;  dmIceRes = 1.0; end %1.0deg
+   dmIceLat1 = 90-dmIceRes/2;
+   dmIceLon1 = -180+dmIceRes/2;
+
+
+   %dmIcePath = ['/data/pkgroup2/xiaolei/SWATH/ice_ssmi/'];
+   dmIcePath = inPathSeaIce;
+
+   nXdim=304;
+   nYdim=448;
+   sXdim=316;
+   sYdim=332;
+
+
+   %--
+   if First
+      latV = origLat1 : -origRes : -90;
+      lonV = origLon1 :  origRes : 180; %-180..180
+      [lonM,latM] = meshgrid(lonV,latV); %90..-90, -180..180; [3600,7200]
+
+      odir=cd('~/srb/dev2/data/sat/seaice/');
+         [ii,jj] = ssmiMapLL(latM,lonM);
+      cd(odir);
+      
+      sb = ii>=1 & ii<=nXdim & jj>=1 & jj<=nYdim & latM>0;
+      northSub = nan(size(ii));
+      northSub(sb) = sub2ind([nXdim,nYdim],ii(sb),jj(sb));
+      
+      sb = ii>=1 & ii<=sXdim & jj>=1 & jj<=sYdim & latM<=0;
+      southSub = nan(size(jj));
+      southSub(sb) = sub2ind([sXdim,sYdim],ii(sb),jj(sb));
+      
+      First = false;
+   end
+
+   
+   %--
+   yyyy = num2str(year, '%04d');
+   mm   = num2str(month,'%02d');
+   %ddd  = num2str(doy,  '%03d');
+
+   if day==99
+      dd = '';
+      dmStr = 'monthly';
+      dmPath = dmStr;
+   else
+      dd = num2str(day, '%02d');
+      dmStr = 'daily';
+      dmPath = [ dmStr,'/'];%dmPath = [ dmStr,'/',yyyy];
+   end
+
+   numLon = 360/origRes;
+   numLat = 180/origRes;
+   dmIce = nan(numLat,numLon); %to match the dimension of lonM and latM
+
+   hemStrC = {'north','south'};
+   for ihem = 1:2
+
+      hemStr = hemStrC{ihem};
+      
+      fpath = [dmIcePath,'/',hemStr,'/',dmPath,'/'];
+      fptn  = [fpath,'/','nt_',yyyy,mm,dd,'_*.bin'];
+      flist = dir(fptn);
+      if (length(flist)>1)
+         disp('--- read_daily_ice(): multi ice files!')
+         keyboard
+      end
+      fullName = [fpath,'/',flist.name];
+      
+      if strcmp(hemStr, 'north')
+         xdim = nXdim;
+         ydim = nYdim;
+      elseif strcmp(hemStr, 'south')
+         xdim = sXdim;
+         ydim = sYdim;
+      end      
+      
+      fid = fopen(fullName);
+         hdr = fread(fid,300,'uint8');
+         z   = fread(fid,xdim*ydim,'uint8');
+      fclose(fid);
+      z = reshape(z,[xdim,ydim]);
+
+
+      if strcmp(hemStr, 'north')
+
+         sb = ~isnan(northSub); 
+         dmIce(sb) = z( northSub(sb) ); %[NY,NX]
+
+      elseif strcmp(hemStr, 'south')
+      
+         sb = ~isnan(southSub);
+         dmIce(sb) = z( southSub(sb) ); %[NY,NX]
+
+      end      
+   
+   end
+      
+   %---
+   %Data Value	Meaning
+   %0 - 250	Sea ice concentration (fractional coverage scaled by 250)
+   %251	   Circular mask used in the Arctic to cover the irregularly-shaped data gap around the pole (caused by the orbit inclination and instrument swath)
+   %252	   Unused
+   %253	   Coastlines
+   %254	   Superimposed land mask
+   %255	   Missing data
+   %
+   dmIce = single(dmIce);
+   
+   dmIce( dmIce>250 ) = NaN;
+
+   dmIce = dmIce./2.5;
+
+   dmIce = dmIce'; %[NX,NY] or [7200,3600]
+
+
+   %--- regrid to 1deg, if 1deg version.
+   if gridRes == 1.0
+
+      %--- sampling downscal
+      %z= dmIce(10:20:end, 10:20:end);
+      
+      %--- average downscal
+      %
+      boxLen = dmIceRes/origRes; %=20   
+      if boxLen ~=1
+         z = reshape(dmIce, [boxLen,numLon/boxLen,boxLen,numLat/boxLen]);
+         z = permute(z,[1,3,2,4]);
+         z = reshape(z,[boxLen*boxLen, numLon/boxLen, numLat/boxLen]);
+         z = squeeze(nanmean(z,1));
+      end
+   
+      dmIce = z;
+
+   end
+   
+%keyboard
+end
+
+
+
+
+
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%---------------------------------------------------------------------
+function [ds,varargout] = obtain_hdf_datafield_alb16(hdfID, dataName)
+%---------------------------------------------------------------------
+%-- 120219: Dont use HDF-EOS interface, it needs a seperate HDF view to
+%   read attributes that is local to data field. Use directly the HDF
+%   interface is simple and enough for my current application.
+%   4 ways to read a HDFEOS file
+%     1-- hdftool 
+%     2-- hdfread !the high-level Matlab function. no way to read attributes.
+%     3-- hdfeos low-level functions !need seperate HDF view to read attributres.
+%     4-- hdf low-level functions !may be complicated for some HDFEOS files.
+
+   %[nData,nGlbAttr,sts]=hdfsd('fileinfo',fid);
+   %for ip = 1:length(paraNames)
+      %pName = paraNames{ip};
+
+      dsIdx = hdfsd( 'nametoindex', hdfID, dataName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', hdfID, dsIdx );
+      [dsname, dsndims, dsdims, dstype, dsatts, sts] =...
+                                            hdfsd( 'getinfo', dsHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16(): sts~=0!'); keyboard; end
+
+
+      %dsndims  = 2;
+      %dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, sts] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16(): sts~=0!'); keyboard; end
+
+
+      attHdl       = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+      [sclfac,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16():: sts~=0!'); keyboard; end
+      
+      attHdl       = hdfsd( 'findattr', dsHdl, 'add_offset' );
+      [offset,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16(): sts~=0!'); keyboard; end
+      
+      attHdl       = hdfsd( 'findattr', dsHdl, '_FillValue' );
+      [misval,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16(): sts~=0!'); keyboard; end
+
+
+      %-- Matlab integer type CAN NOT be set to NaN! 
+      %   but ds==misval is OK, although misval is a int16 integer.
+      ds = single(ds);
+      %ds = double(ds);
+      ds(ds==misval) =NaN;
+      ds = sclfac*(ds-offset);
+      
+      sts = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+      
+      varargout{1} = dsdims;
+
+   %end %--for ip = 1:length(paraNames)
+
+%keyboard
+   
+%{
+   %Open swath
+   swathID = hdfsw('attach', hdfID, swathName);
+
+   %Reading Data from a Data Field
+   %dataName='Retrieved_Moisture_Profile';
+
+   [data, sts] = hdfsw('readfield', swathID, dataName, [], [], []);
+   
+   %Reading lat and lon data
+   %[lon, status] = hdfsw('readfield', swathID, 'Longitude', [], [], []);
+   %[lat, status] = hdfsw('readfield', swathID, 'Latitude', [], [], []);
+
+   %Detaching from the Swath Object
+   hdfsw('detach', swathID);
+
+   
+   %Convert the data to double type for plot
+   %data=double(data);
+   %lon=double(lon);
+   %lat=double(lat);
+
+   %Reading attributes from the data field
+   %dataName='Retrieved_Moisture_Profile';
+
+   sds_index = hdfsd('nametoindex', SD_id, dataName);
+   sds_id = hdfsd('select',SD_id, sds_index);
+
+
+   %Reading filledValue from the data field
+   fillvalue_index = hdfsd('findattr', sds_id, '_FillValue');
+   [fillvalue, status] = hdfsd('readattr',sds_id, fillvalue_index);
+
+   %Reading units from the data field
+   units_index = hdfsd('findattr', sds_id, 'units');
+   [units, status] = hdfsd('readattr',sds_id, units_index);
+
+   %Reading scale_factor from the data field
+   scale_index = hdfsd('findattr', sds_id, 'scale_factor');
+   [scale, status] = hdfsd('readattr',sds_id, scale_index);
+
+   %Reading add_offset from the data field
+   offset_index = hdfsd('findattr', sds_id, 'add_offset');
+   [offset, status] = hdfsd('readattr',sds_id, offset_index);
+
+   %Terminate access to the corresponding data set
+   hdfsd('endaccess', sds_id);
+%}
+
+end
+
+
+%---------------------------------------------------------------------
+function [ds,varargout] = obtain_hdf_datafield_daysnow(hdfID, dataName)
+%---------------------------------------------------------------------
+%-- 120329: Modified from "obtain_datafield.m"
+%-- 120219: Dont use HDF-EOS interface, it needs a seperate HDF view to
+%   read attributes that is local to data field. Use directly the HDF
+%   interface is simple and enough for my current application.
+%   4 ways to read a HDFEOS file
+%     1-- hdftool 
+%     2-- hdfread !the high-level Matlab function. no way to read attributes.
+%     3-- hdfeos low-level functions !need seperate HDF view to read attributres.
+%     4-- hdf low-level functions !may be complicated for some HDFEOS files.
+
+   %[nData,nGlbAttr,sts]=hdfsd('fileinfo',fid);
+   %for ip = 1:length(paraNames)
+      %pName = paraNames{ip};
+
+      dsIdx = hdfsd( 'nametoindex', hdfID, dataName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', hdfID, dsIdx );
+      [dsname, dsndims, dsdims, dstype, dsatts, sts] =...
+                                            hdfsd( 'getinfo', dsHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_daysnow(): sts~=0!'); keyboard; end
+
+
+      %dsndims  = 2;
+      %dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, sts] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+      if sts~=0 disp('---obtain_hdf_datafield_daysnow(): sts~=0!'); keyboard; end
+
+      %attHdl       = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+      %[sclfac,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      %if sts~=0 disp('---obtain_hdf_datafield(): sts~=0!'); keyboard; end
+      %
+      %attHdl       = hdfsd( 'findattr', dsHdl, 'add_offset' );
+      %[offset,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      %if sts~=0 disp('---obtain_hdf_datafield(): sts~=0!'); keyboard; end
+      %
+      attHdl       = hdfsd( 'findattr', dsHdl, '_FillValue' );
+      [misval,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_daysnow(): sts~=0!'); keyboard; end
+
+
+      %-- Matlab integer type CAN NOT be set to NaN! 
+      %   but ds==misval is OK, although misval is a int16 integer.
+      ds = single(ds);
+      %ds = double(ds);
+      ds(ds==misval) =NaN;
+      %ds = sclfac*(ds-offset);
+      
+      sts = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+      
+      varargout{1} = dsdims;
+
+   %end %--for ip = 1:length(paraNames)
+
+
+end 
+
+%---------------------------------------------------------------------
+function [ds,varargout] = obtain_hdf_datafield_sfcTyp(...
+                                          hdfID, dataName, toFloat)
+%---------------------------------------------------------------------
+%-- 120329: Modified from "obtain_datafield.m"
+%-- 120219: Dont use HDF-EOS interface, it needs a seperate HDF view to
+%   read attributes that is local to data field. Use directly the HDF
+%   interface is simple and enough for my current application.
+%   4 ways to read a HDFEOS file
+%     1-- hdftool 
+%     2-- hdfread !the high-level Matlab function. no way to read attributes.
+%     3-- hdfeos low-level functions !need seperate HDF view to read attributres.
+%     4-- hdf low-level functions !may be complicated for some HDFEOS files.
+
+   %[nData,nGlbAttr,sts]=hdfsd('fileinfo',fid);
+   %for ip = 1:length(paraNames)
+      %pName = paraNames{ip};
+
+      dsIdx = hdfsd( 'nametoindex', hdfID, dataName ); %pisoIdx=9, pvolIdx=19, pgeoIdx=29
+      dsHdl = hdfsd( 'select', hdfID, dsIdx );
+      [dsname, dsndims, dsdims, dstype, dsatts, sts] =...
+                                            hdfsd( 'getinfo', dsHdl );
+      if sts~=0 disp('---obtain_hdf_datafield_alb16(): sts~=0!'); keyboard; end
+
+
+      %dsndims  = 2;
+      %dsdims   = [NY,NX]; %hdf follows C, starts from 0 and is row first.
+      dsstart  = zeros( 1,dsndims ); % Creates the vector [0 0]
+      dsstride = []; 
+      dsedges  = dsdims;
+      [ds, sts] = hdfsd( 'readdata', dsHdl, dsstart, dsstride, dsedges );
+      if sts~=0 disp('---obtain_hdf_datafield_sfcTyp(): sts~=0!'); keyboard; end
+
+
+      %-- Matlab integer type CAN NOT be set to NaN! 
+      %   but ds==misval is OK, although misval is a int16 integer.
+      if toFloat
+
+         attHdl       = hdfsd( 'findattr', dsHdl, 'scale_factor' );
+         [sclfac,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+         if sts~=0 disp('---obtain_hdf_datafield_sfcTyp():: sts~=0!'); keyboard; end
+      
+         attHdl       = hdfsd( 'findattr', dsHdl, 'add_offset' );
+         [offset,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+         if sts~=0 disp('---obtain_hdf_datafield_sfcTyp(): sts~=0!'); keyboard; end
+      
+         attHdl       = hdfsd( 'findattr', dsHdl, '_FillValue' );
+         [misval,sts] = hdfsd( 'readattr', dsHdl, attHdl );
+         if sts~=0 disp('---obtain_hdf_datafield_sfcTyp(): sts~=0!'); keyboard; end
+
+         %ds = single(ds);
+         ds = double(ds);
+         ds(ds==misval) =NaN;
+         ds = sclfac*(ds-offset);
+
+      end
+      
+      sts = hdfsd( 'endaccess', dsHdl ); %need for WRITTING.
+      
+      varargout{1} = dsdims;
+
+   %end %--for ip = 1:length(paraNames)
+
+
+end 
+
+
+

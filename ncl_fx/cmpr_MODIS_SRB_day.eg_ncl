@@ -1,0 +1,341 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/ccm_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/popRemap.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/skewt_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/wind_rose.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+begin
+;*******************************
+; For binary files 
+;******************************* 
+;------ head
+     Sat            = "MODIS"
+   
+     vName		    = "ssda"
+
+     if substring(vName,2,2).eq."d" then
+      symbl          = " SW" +"~F18~r~F21~"+" (W/m~S~2~N~)"
+      keywrd         = "downward" 
+     end if
+     if substring(vName,2,2).eq."u" then
+      symbl          = " SW" +"~F18~p~F21~"+" (W/m~S~2~N~)"
+      keywrd         = "upward"
+     end if
+     
+     longname       = "UMD surface fluxes ,all sky"
+    
+     yyyymmddStrt	= 20150101
+     yyyymmddEnd    = 20151231
+     
+     yrs            = toint(yyyymmddStrt/10000)
+     yre            = toint(yyyymmddEnd/10000)
+     print(yrs+" "+yre)
+
+
+	nLat	 = 180
+	nLon	 = 360
+    UNDEF = -9999.
+
+	geoinfo  = (/-89.5,89.5,-179.5,179.5/)
+	
+	dimNames = (/"time","lat","lon"/)
+	datatype = "float"
+	units	 = "(W/M^2)"
+	nrec	 = 0
+;------ Flags   
+    ncFlag      = False
+    
+    plotFlagMap = True
+    landmask    = False
+    watermask   = False
+    mpchina     = False
+
+    yyyymmdd = yyyymmdd_time(2014, 2014, "integer")	    
+    ntim     = dimsizes(yyyymmdd)
+ 	dimsz	 = (/ntim,nLat,nLon/)
+;+++ Read Data        
+	pthin     = "/data/srb8/wchen/SW/1deg/result/comb/"; using version6.1 MODIS data
+	;ssda_MODIS_SRB_daily_2014_2014.dat
+	filename  = pthin+vName+"_MODIS_SRB_daily_"+yrs+"_"+yre+".dat" 
+ 	print(filename)
+
+    data = new(dimsz,datatype,UNDEF)
+	data = fbindirread(filename,0,dimsz, datatype)
+    data = data(:,::-1,:)
+    data = where(data.le.0,UNDEF,data)
+	printMinMax(data,True)
+    data = addmeta(data,dimsz,dimNames,geoinfo,longname,units,yyyymmdd,-1)
+	printVarSummary(data)
+    printMinMax(data,True)
+    mod1 = data
+    ;mod1@_FillValue = UNDEF
+    mod2 = mod1
+       
+    pthin     = "/data/srb3/wchen/MODIS/SW_SRB/Results/case_1deg_Reprocess/diff_vars/"; using old version MODIS data
+	filename  = pthin+vName+"_MODIS_SRB_daily_"+yrs+"_"+yre+".dat" 
+    data = fbindirread(filename,0,dimsz, datatype)
+    data = data(:,::-1,:)      
+    data = where(data.le.0,UNDEF,data)
+	printMinMax(data,True) 
+    mod2 = (/data/)
+    delete(data)
+
+    diff = mod1
+    diff = (/mod1-mod2/)
+    printMinMax(diff,True)
+
+    tmp1 = mod1(lat|:,lon|:,time|:)
+    tmp2 = mod2(lat|:,lon|:,time|:)
+    ccr  = esccr(tmp1,tmp2,0)
+    ccr  = where(ccr.le.1.,ccr,1)
+    printVarSummary(ccr)
+    printMinMax(ccr,True)
+    ccr!0 = "lat"
+    ccr!1 = "lon"
+    ccr&lat = mod1&lat
+    ccr&lon = mod1&lon
+    
+;+++ Write Data
+		 
+		if ncFlag then
+			nlat 	= dimsizes(tmp&lat)
+			nlon	     = dimsizes(tmp&lon)
+			lat		= tmp&lat
+			lon		= tmp&lon
+			time      = tmp&time
+			printVarSummary(lat)
+			printVarSummary(lon)
+			printVarSummary(time)
+               year    = time/10000
+               mmdd    = time-year*10000
+               mm      = mmdd/100
+               dd      = mmdd-mm*100
+               print(dd(0)+ " "+ mm(0)+" "+ year(0))
+               delete(time)
+               delete(mmdd)                         
+                 hh      = dd
+                 mn      = dd
+                 sc      = dd         
+            
+          
+                 hh      = 12
+                 mn      = 0
+                 sc      = 0
+                 tunits  =  "days since 1977-01-1 12:00:00" ;"months from 1-1-1"
+                 opt     = 0
+
+                 time    = cd_inv_calendar(year,mm,dd,hh,mn,sc,tunits, opt)
+  	             time!0  = "time"
+  		         print(time(0))
+                 printVarSummary(time)
+                 delete(tmp&time)
+                 tmp&time = time
+                 printVarSummary(tmp)
+               
+                 outpth		= "./data/"
+                 ofname       =vName+"_"+Sat+"_"+region+"_daily_"+time0+"_"+time1+".nc"
+                 print(outpth+ofname)
+                
+			    system("/bin/rm -f "+outpth+ofname)
+			    fnc         =addfile(outpth+ofname,"c")
+               
+			setfileoption(fnc,"DefineMode",True)
+ 			filAtt               = True
+ 			filAtt@title         = longname
+ 			filAtt@source_file   = "None "
+ 			filAtt@Conventions   = "None "  
+ 			filAtt@creation_date = systemfunc("date")
+ 			fileattdef( fnc, filAtt ) ; copy file attributes                    
+ 			dimUnlim = (/True, False, False/)  
+ 			filedimdef(fnc,(/"time","lat","lon"/),(/-1,nlat,nlon/),dimUnlim)
+			filevardef(fnc,"time"    , typeof(time)    , getvardims(time))
+ 			filevardef(fnc,"lat"     , typeof(lat)     , getvardims(lat)) 
+ 			filevardef(fnc,"lon"     , typeof(lon)     , getvardims(lon))
+ 			filevardef(fnc, vName    , typeof(tmp)      , getvardims(tmp))
+			print(getfilevarnames(fnc)) 
+
+            
+  			filevarattdef(fnc,"time"      ,time)
+  			filevarattdef(fnc,"lat"       ,lat)                     
+  			filevarattdef(fnc,"lon"       ,lon)                
+  			filevarattdef(fnc,vName       ,tmp)
+        
+  			setfileoption(fnc,"DefineMode",False)
+
+  			fnc->time       = (/time/)  			
+  			fnc->lat        = (/lat/)
+  			fnc->lon        = (/lon/)
+  			fnc->$vName$    = (/tmp/)
+		end if
+;+++ MAP
+	if plotFlagMap then
+         plot      = new(4,graphic)
+	     wkstype   = "x11";"pdf";"eps";
+	     wkspth    = "~/WORK/modis/figs/"
+	     wksname   = "cmpr_modis_versions_ssda"+"_daily_"+yrs;vName+"_"+Sat+"_eg_"+region+"_"+time0
+
+		print("Plotting")
+   		wks = gsn_open_wks(wkstype, wkspth+wksname)
+   		;gsn_define_colormap(wks,"BlGrYeOrReVi200")  ; choose a color map; MPL_jet
+  		;gsn_define_colormap(wks,"BlAqGrYeOrReVi200"); 
+
+   		res                     = True
+        res@gsnFrame            = False
+        res@gsnDraw    		    = False
+
+   		res@gsnMaximize         = True              
+   		res@gsnAddCyclic        = True           
+   		;res@gsnSpreadColors     = True            
+  
+   		res@cnFillOn            = True            
+   	    ;res@cnFillMode          = "RasterFill"        
+   		res@cnLinesOn           = False            
+   		res@cnInfoLabelOn       = False
+   		res@cnLineLabelsOn      = False
+
+   		res@cnLevelSelectionMode = "ManualLevels"
+   		res@cnLevelSpacingF      = 10.  
+   		res@cnMinLevelValF       = 50. 
+   		res@cnMaxLevelValF       = 450.
+
+   		res@pmTickMarkDisplayMode = "Always"       
+ 		res@tmXBMajorThicknessF     = 3
+        res@tmYLMajorThicknessF     = 3
+        res@tmBorderThicknessF      = 3
+        res@mpGeophysicalLineThicknessF = 2
+
+        res@tmXBLabelFontThicknessF = 4
+        res@tmYLLabelFontThicknessF = 4 
+        res@tmYLLabelFontHeightF	= 0.0175
+        res@tmXBLabelFontHeightF	= 0.0175
+        
+        res@tmYLLabelDeltaF 		= -0.725
+		res@tmXBLabelDeltaF 		= -0.825
+		
+		res@tmYLMinorOn        = False
+    	res@tmYROn             = False
+		res@tmXBMinorOn        = False
+   		res@tmXTOn             = False
+   		
+   		res@lbBoxLinesOn          = False            
+   		res@lbBoxSeparatorLinesOn = False
+   		res@lbLabelStride         = 5
+        res@cnFillPalette = "BlGrYeOrReVi200"
+        res@mpCenterLonF               = 180
+   		;res@mpMinLatF             = temp&lat(0)
+   		;res@mpMaxLatF             = temp&lat(dimsizes(temp&lat)-1)
+   		;res@mpMinLonF             = temp&lon(0)
+   		;res@mpMaxLonF             = temp&lon(dimsizes(temp&lon)-1)
+         
+		; turn on state boundaries; " USStates" ;  "AllBoundaries" 
+   		res@mpOutlineBoundarySets =   "National"
+   		if landmask then
+                 res@cnFillDrawOrder       = "PreDraw"
+                 
+                ;res@mpDataBaseVersion     = "Ncarg4_1"
+                 res@mpOceanFillColor      = "transparent"
+                 res@mpInlandWaterFillColor= "white"
+                 res@mpLandFillColor       = "white"
+        end if;landmask 
+          if watermask then
+                 res@cnFillDrawOrder       = "PreDraw"
+                 res@mpFillAreaSpecifiers  = (/"Land", "Water"/)
+                 res@mpSpecifiedFillColors = (/"transparent","white"/)
+                ;res@mpDataBaseVersion     = "Ncarg4_1"
+                 res@mpOceanFillColor      =   "white"
+                 res@mpInlandWaterFillColor= "white"
+                 res@mpLandFillColor       = "transparent"
+               end if;watermask
+
+          if mpchina then
+           res@mpDataSetName               = "Earth..4"
+           res@mpDataBaseVersion           = "MediumRes"
+           res@cnFillDrawOrder             = "PreDraw"
+           res@mpOutlineOn                 = True
+           res@mpFillAreaSpecifiers        = (/"Land", "Water","China:states","Taiwan"/)
+           res@mpSpecifiedFillColors       = (/"white","white","transparent","transparent"/)
+           res@mpGeophysicalLineThicknessF = 2
+           res@mpNationalLineThicknessF    = 2
+          end if;mpchina                                       
+   		
+
+          res@gsnLeftString         = Sat+" "+symbl	    
+          res@gsnRightString        = "Annual Mean"
+
+    
+   		plot(0)=gsn_csm_contour_map(wks,dim_avg_n_Wrap(mod1,0),res)
+  		draw(plot(0))
+  		frame(wks)
+        plot(1)=gsn_csm_contour_map(wks,dim_avg_n_Wrap(mod2,0),res)
+  		draw(plot(1))
+  		frame(wks)
+        cmap   =read_colormap_file("WhBlGrYeRe")
+        ncolors = dimsizes(cmap(:,0))            
+        res@cnFillPalette := cmap(0::4,:)
+       ;res@cnMaxLevelCount = ncolors-1      
+        res@cnLevelSpacingF=1.
+   		res@cnMinLevelValF= 0.
+   		res@cnMaxLevelValF=25.
+        res@gsnRightString        = "Annual Mean Differences"
+        plot(2)=gsn_csm_contour_map(wks,dim_avg_n_Wrap(diff,0),res)
+  		draw(plot(2))
+  		frame(wks)
+        cmap := read_colormap_file("MPL_YlOrRd")
+        res@cnFillPalette := cmap
+        res@gsnRightString        = "Corelation Coefficients"
+        res@cnMinLevelValF       = .9                 ; min level
+        res@cnMaxLevelValF       =  1.                 ; max level
+        res@cnLevelSpacingF      = .005                  ; contour level spacing
+        plot(3)=gsn_csm_contour_map(wks,ccr(:,:,0),res)
+  		draw(plot(3))
+  		frame(wks)
+
+        reshist = True
+        reshist@gsnFrame                    = False
+        reshist@gsnDraw                                        = False
+        
+        reshist@gsnMaximize                           = True 
+        reshist@gsnHistogramBarWidthPercent = 100
+        reshist@tmLabelAutoStride          = True
+        reshist@tmXBMajorLengthF           = 0.01
+        ;reshist@tmXBLabelStride             = 2
+        reshist@tmYLFormat                 = "0@!;*^se"
+        reshist@gsnHistogramMinMaxBinsOn   = False
+
+
+        reshist@tiYAxisOffsetXF            = 0.005
+        reshist@tiXAxisOffsetYF            = 0.005
+        reshist@tmYLLabelFontThicknessF    = 4
+        reshist@tmXBLabelFontThicknessF           = 4
+        reshist@tmYLLabelFontHeightF              = 0.035
+        reshist@tmXBLabelFontHeightF              = 0.0325
+        reshist@tmXBLabelDeltaF                   = -0.55
+        reshist@tmYLLabelDeltaF                = -0.55
+          
+        reshist@tiYAxisFontThicknessF                   = 4
+        reshist@tiYAxisFontHeightF                      = 0.035
+        reshist@tiXAxisFontThicknessF                   = 4
+        reshist@tiXAxisFontHeightF                      = 0.035
+        reshist@gsnHistogramClassIntervals = fspan(-50,50,11)
+        colors = (/"maroon4","firebrick","navyblue","darksalmon","yellow","red",\
+              "orange","forestgreen","darkkhaki","paleturquoise1","hotpink","plum3"/)
+;darkkhaki tan3
+        reshist@gsnHistogramBarColors = colors        
+
+      reshist@tiXAxisString              =  "Differences in 2014"
+      ;ploth=gsn_histogram(wks,ndtooned(diff),reshist)
+    
+ 
+        ;draw(ploth)
+
+frame(wks)
+	end if
+
+
+end
+

@@ -1,0 +1,112 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/ccm_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/popRemap.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/skewt_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/wind_rose.ncl"
+load "$nclfx/addmeta.ncl"
+ 
+;*******************************
+; For binary files 
+;******************************* 
+;---------- head ---------------
+;+++ modify parameters
+ 
+
+;====== Plot Parameters ======
+lgtype    = "star";"rectangular"
+pltpth    = "./figs/"         ;figure pth
+wksname   = pltpth+"legends_type_h_"+lgtype
+wkstype   = "eps";"x11";        ;figure type
+strs      = (/" BSRN / SURFRAD"," GOES                ","GOES    ","BSRN / SURFRAD  ","MOD11C3v6  "/)
+colors    = (/"blue","red","blue","orange","red"/) 
+sclf      = 0.8          
+
+if (lgtype.eq."line") .or.(lgtype.eq."star") then
+  wks = gsn_open_wks(wkstype,wksname)       
+
+  stars= NhlNewMarker(wks, "z", 35, 0.0, 0.0, 1., 1., 0.0)
+  patterns  =  (/0,0,stars,stars,stars/)   
+   xpos=(/0.1, 0.65, 0.12,  0.425,  0.775/)      
+   ypos=(/0.65, 0.65, 0.4, 0.4, 0.4/)
+   nplt=dimsizes(strs)
+  
+  
+    lgres                    = True
+    lgres@lgLineThicknessF   = 3.
+    ;lgres@lgItemType         = "Lines"
+    lgres@lgPerimOn          = False           
+    lgres@lgLabelFontHeightF = .05*sclf*sclf  
+    lgres@lgLabelFontThicknessF = 4
+    lgres@vpHeightF          = 0.4            
+    lgres@vpWidthF           = 0.4 
+    lgres@lgMonoLineColor    = True 
+    lgres@lgMonoDashIndex    = True
+    lgres@lgLineLabelStrings = ""
+ do ilg = 0,1   
+    lgres@lgDashIndex        = patterns(ilg)
+    lgres@lgLineColor        = colors(ilg)
+  
+    
+  gsn_legend_ndc(wks,1,strs(ilg),xpos(ilg),ypos(ilg),lgres)
+  
+  end do
+  
+  
+        pmres                        =  True
+          
+        pmres@gsMarkerSizeF          =  0.03*sclf          
+        pmres@gsLineThicknessF       =  3.          
+        pmres@gsMarkerIndex          =  NhlNewMarker(wks, "z", 35, 0.0, 0.0, 1., 1., 0.0)
+        
+        txres               = True
+        txres@txFontHeightF = 0.02*sclf 
+        txres@txJust        = "CenterLeft";"BottomLeft"
+  do ilg=2,4
+      pmres@gsMarkerColor          =colors(ilg)
+      gsn_polymarker_ndc(wks,xpos(ilg),ypos(ilg),pmres)
+      gsn_text_ndc(wks,strs(ilg),xpos(ilg)+0.025,ypos(ilg),txres)
+  end do
+ 
+ frame(wks)    ; advance frame
+end if ;lgtype
+
+if (lgtype.eq."rectangular") then
+    wks = gsn_open_wks(wkstype,wksname)
+     pgres                  = True
+     pgres@gsLineThicknessF = 2.0   ; make lines thicker
+    
+     txtres               = True
+  txtres@txFontHeightF = 0.015        ; font height
+  txtres@txJust        = "CenterLeft" ; align text to left
+
+  
+  ypts = (/0.8,0.8,0.83,0.83,0.8/)
+  xpts = (/0.15,0.2,0.2,0.15,0.15/)
+  pgres@gsFillColor = "red"
+  gsn_polygon_ndc(wks,xpts,ypts,pgres)
+  gsn_polyline_ndc(wks,xpts,ypts,pgres)
+  gsn_text_ndc(wks,"MODIS/BSRN",.21,.815,txtres)
+
+  xpts = (/0.4,0.45,0.45,0.4,0.4/)
+  pgres@gsFillColor = "blue"
+  gsn_polygon_ndc(wks,xpts,ypts,pgres)
+  gsn_polyline_ndc(wks,xpts,ypts,pgres)
+  gsn_text_ndc(wks,"GOES-E/BSRN",.46,.815,txtres)
+
+  xpts = (/0.65,0.7,0.7,0.65,0.65/)
+  pgres@gsFillColor = "yellow"
+  gsn_polygon_ndc(wks,xpts,ypts,pgres)
+  gsn_polyline_ndc(wks,xpts,ypts,pgres)
+  gsn_text_ndc(wks,"GOES-E/MODIS",.71,.815,txtres)
+
+ 
+
+  frame(wks)
+
+end if
+print("done")
+

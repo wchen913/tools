@@ -1,0 +1,155 @@
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+
+begin
+;************************************************************************
+; For binary files 
+; one record includes all of the daily or monthly data
+; old:xiaolei's version
+; new:reprocessed MODIS data (Yingtao)
+; DX :the bias corrected data of merging DX and MODIS data (Banglin)
+; STs:"IO";"China";"TWP";"FLO"  ;"RAMA";"TWP";"TAO";"Brazil";"FLO";"China"	 
+;************************************************************************ 
+;------ head
+	 vName		= "ssda"
+
+	 Sat        = "MODIS"
+     timeRes    = "daily";"monthly"  
+     UNDEF 	 	= -9999.
+
+	 St			= "SURFRAD";"TAO";"RAMA"
+   
+   ;++ Extract start/end date (YYYYMM/YYYYMMDD)
+	ymdStrt  = toint(20140101)    
+   	ymdEnd   = toint(20141231)
+    
+   
+;------ Parameters      
+	longname      = "UMD surface fluxes at "+St+"sites" 
+	datatype 	= "float"
+	units	 	= "(W M~S~-2~N~)"
+	 
+;+++ Total length
+    
+    yyStrt   = 2014
+    yyEnd    = 2014
+    mmStrt   = 1
+    ddStrt   = 1
+    mmEnd    = 12    
+    ddEnd    = 31    
+   
+;++ Flags    
+    ncFlag   = True
+;++ Geo Info  
+	nLat	 = 180
+	nLon	 = 360 
+	geoinfo  = (/-89.5,89.5,-179.5,179.5/)
+	dimsz	 = (/nLat,nLon/)
+	dimNames = (/"lat","lon"/)
+	Lat      = fspan(geoinfo(0),geoinfo(1),nLat)
+    Lon      = fspan(geoinfo(2),geoinfo(3),nLon)
+  
+   if St.eq."TWP" then
+       region  = St
+       StLat = (/-0.521,-12.425,-2.061/)
+	   StLon = (/166.9167,130.891,147.4254/)
+    end if
+	if St.eq."SURFRAD" then
+       	region  = St
+    	StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    	StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    	stid  = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+    end if
+    nSt      = dimsizes(StLon)
+;++ Time Stamps    
+ 
+	 yyyymmdd = yyyymmdd_time(toint(yyStrt), toint(yyEnd), "integer")
+	 tStrt   = toint(yyStrt*10000+mmStrt*100+ddStrt)
+     tEnd    = toint(yyEnd*10000+mmEnd*100+ddEnd)
+     print(tStrt+"-"+tEnd)
+     TIME    = yyyymmdd({tStrt:tEnd})
+     delete(yyyymmdd)
+     indts   = ind(TIME.ge.ymdStrt.and.TIME.le.ymdEnd)
+	 printMinMax(indts,True) 
+	 time    = TIME(indts)	
+
+  ntime = dimsizes(indts)
+  nrec	= indts
+  print(dimsizes(nrec))
+  print(dimsizes(time))
+
+  data           = new(dimsz,datatype,UNDEF)
+  data_out		 = new((/ntime,nSt/),datatype,UNDEF)
+  data_out!0 	 = "time"
+  data_out&time  = time
+  data_out!1 	 = "site" 
+  data_out&site  = ispan(1,nSt,1)
+;------------------------- 
+;------ Extract Data -----  		 		
+    ;pthin     = "/data/srb3/wchen/MODIS/SW_SRB/Results/case_1deg_Reprocess/diff_vars/"
+	pthin     	= "/data/srb8/wchen/SW/1deg/result/comb/"
+    fname		= vName+"_MODIS_SRB_daily_"+yyStrt+"_"+yyEnd+".dat" 
+    yrevFlag    = True
+ 	print(pthin+fname)	
+   do iSt	= 0,nSt-1
+	 indlat	= ind(Lat.ge.StLat(iSt)-0.5.and.Lat.le.StLat(iSt)+0.5)
+     indlon = ind(Lon.ge.StLon(iSt)-0.5.and.Lon.le.StLon(iSt)+0.5)
+    if (.not.all(ismissing(indlat)) ).and.(.not.all(ismissing(indlon))) then
+		print(Lat(indlat))
+        print(Lon(indlon))
+    	tmp = new((/ntime,dimsizes(indlat),dimsizes(indlon)/),datatype,UNDEF)
+		print("extract data")   
+	  do itime = 0,ntime-1
+		 ;print(time(itime)+" nrec="+nrec(itime))
+        data	= fbindirread(pthin+fname,nrec(itime),dimsz,datatype)
+		  replace_ieeenan(data,UNDEF,0)
+		  if yrevFlag then
+           data=data(::-1,:)
+          end if ;if yrevFlag
+        data    = addmeta(data,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+        data@_FillValue  = UNDEF	
+        do itlat = 0,dimsizes(indlat)-1
+         do itlon = 0,dimsizes(indlon)-1
+            tmp(itime,itlat,itlon)=data(indlat(itlat),indlon(itlon))
+         end do ;do itlon
+        end do  ;do itlat
+	  end do    ;do itime
+	  if (dimsizes(indlat).gt.1).or.(dimsizes(indlon).gt.1) then
+		    rad    	= 4.0*atan(1.0)/180.0
+            wgty	= cos(Lat(indlat)*rad)
+        	temp    = wgt_areaave_Wrap(tmp,wgty,1.0,0)
+			delete(wgty)
+            delete(tmp)
+			tmp	    = temp
+			delete(temp)
+	  end if ;dimsizes(indlat)
+	  data_out(:,iSt)=(/tmp/)
+	  delete(tmp)
+	else
+		print("Can't not find grid near Site")
+		exit
+	end if ;if (.not.all(ismissing(indlat)) )
+	delete(indlat)
+	delete(indlon)	
+   end do ;do iSt
+	printMinMax(data_out,True)	 
+	printVarSummary(data_out)
+;++ Write Data
+		
+		if ncFlag then
+			print("Write NetCDF Data")
+			outpth	= "./"
+			ofname = vName+"_"+Sat+"_061_4_"+St+"_"+nSt+"st"+"_"+\
+			         timeRes+"_"+ymdStrt+"_"+ymdEnd+".nc"			 
+        	print(outpth+ofname)
+	       ;exit	 
+			delete(data_out@_FillValue)
+			system("/bin/rm -f "+outpth+ofname)
+    		fod     		= addfile(outpth+ofname,"c")
+        	fod->latst  	= tofloat(StLat)
+			fod->lonst  	= tofloat(StLon)
+   	        fod->$vName$ 	= data_out
+   		    delete(fod)
+			delete(data_out) 
+		end if
+end

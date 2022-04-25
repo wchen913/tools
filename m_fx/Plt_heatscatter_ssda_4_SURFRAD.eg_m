@@ -1,0 +1,352 @@
+addpath('/data/srb1/wchen/tools/m_fx/','-end')
+
+pth       = './';
+StOrg     = 'SURFRAD';
+EstOrg    = 'UMD_MODIS_061_and_000';
+
+nStd      = 0;
+FigName   = ['~/WORK/modis/figs/heatscatters_ssda_',EstOrg,'_vs_',StOrg,'_st_allx'];         
+if nStd == 0
+    optOut = 'no';
+else
+    optOut = 'yes';   
+end
+xlim	 = [0 500];ylim     = xlim;
+nxbin	 = 100;nybin    = nxbin;
+
+StLon       = [-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62];
+StLat       = [  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73]	;
+nSt         = num2str(length(StLat));
+ stid  		= {'dra', 'bon', 'gwn','fpk','tbl','psu','sxf'};
+%++++++++++
+%Estimation
+%++++++++++
+ estfname = 'ssda_MODIS_061_4_SURFRAD_7st_daily_20150101_20151231.nc';
+ ncdisp(estfname)
+ estdata1  = ncread(estfname,'ssda');
+ estdata1(estdata1<0)=NaN;
+ whos estdata1
+ 
+ estfname = 'ssda_MODIS_000_4_SURFRAD_7st_daily_20150101_20151231.nc';
+ estdata2  = ncread(estfname,'ssda');
+ estdata2(estdata2<0)=NaN;
+ whos estdata2
+ 
+ stfname  = 'ssda_SURFRAD_7st_daily_20150101_20151231_Nshift.nc'; 
+ ncdisp(stfname)
+ stdata	  = ncread(stfname,'ssda');
+ stdata(stdata<0)=NaN;
+%------compare with UMD-----
+ x = stdata(:);
+ disp([min(x),max(x)])
+  
+ y    = estdata1(:);
+ disp([min(y),max(y)])
+ %++++++++++++++++++
+ x(isnan(y))=NaN;
+ y(isnan(x))=NaN;
+%+++++++++++
+% Statistics
+%+++++++++++
+ [Bias,avg,RMSE,Std,stdbfr,Corr,npts,N,outline]=CalculateStatistics_v5(x,y,1,nStd,optOut);  
+
+ statistics =  {sprintf('Corr: %.2f', Corr),...
+                [sprintf('Bias: %.2f', Bias), '(',num2str(abs(Bias/avg)*100,'%3.1f'),'%)'],...
+                [sprintf('Std: %.2f', Std),'(',num2str(abs(Std/avg)*100,'%3.1f'),'%)'],...
+                 [sprintf('RMSE: %.2f', RMSE),'(',num2str(abs(RMSE/avg)*100,'%3.1f'),'%)'],...
+                 sprintf('N: %d', N)};
+             disp(statistics)
+ if strcmpi(optOut,'yes') 
+                x(outline)=NaN;
+                y(outline)=NaN;
+                clear outline
+ end 
+ inds = find(~isnan(x));
+ xx   = x(inds);
+ yy   = y(inds);
+ disp('-----min/max x/y')
+ disp([min(xx),max(xx);min(yy),max(yy)])
+ %disp([length(xx),length(yy)])
+
+%++++++++++
+% Plotting
+%++++++++++ 
+
+tistrs  = {'Observed SW{\downarrow} (W/m^{2})','Estimated SW{\downarrow} (W/m^{2})',''};
+
+ 
+heatscatters(xx,yy,'100',tistrs,statistics)
+ 
+
+line(xlim,ylim,'LineStyle','--','color', 'k','linewidth',2.5)
+
+set(gca,'xlim',xlim,'xtick',xlim(1):nxbin:xlim(2),'ylim',ylim,'ytick',ylim(1):nybin:ylim(2),...
+'linewidth',2.125,'FontSize', 15,'FontName', 'Times');
+  
+annotation('textbox', [0.65 0.16 0.1 0.1],...
+ 'String','(a)',...
+  'EdgeColor', 'none', 'FontSize', 15,'FontName', 'Times');
+ax1=gca;
+% print(gcf,'-djpeg','-r300',[FigName,'_1'])
+keyboard
+%----- comparison 2 ----------------------
+ y    = estdata2(:);
+ disp([min(y),max(y)])
+ %++++++++++++++++++
+ x(isnan(y))=NaN;
+ y(isnan(x))=NaN;
+%+++++++++++
+% Statistics
+%+++++++++++
+ [Bias,avg,RMSE,Std,stdbfr,Corr,npts,N,outline]=CalculateStatistics_v5(x,y,1,nStd,optOut);  
+%  statistics =  {sprintf('Corr: %.2f', Corr),sprintf('Bias: %.2f', Bias), ...
+%  sprintf('Std: %.2f', Std),sprintf('RMSE: %.2f', RMSE),...
+%  sprintf('N: %d', N)}; 
+ statistics =  {sprintf('Corr: %.2f', Corr),...
+                [sprintf('Bias: %.2f', Bias), '(',num2str(abs(Bias/avg)*100,'%3.1f'),'%)'],...
+                [sprintf('Std: %.2f', Std),'(',num2str(abs(Std/avg)*100,'%3.1f'),'%)'],...
+                 [sprintf('RMSE: %.2f', RMSE),'(',num2str(abs(RMSE/avg)*100,'%3.1f'),'%)'],...
+                 sprintf('N: %d', N)};
+             disp(statistics)
+ if strcmpi(optOut,'yes') 
+                x(outline)=NaN;
+                y(outline)=NaN;
+                clear outline
+ end 
+ inds = find(~isnan(x));
+ xx   = x(inds);
+ yy   = y(inds);
+ disp('-----min/max x/y')
+ disp([min(xx),max(xx);min(yy),max(yy)])
+heatscatters(xx,yy,'100',tistrs,statistics)
+ 
+
+line(xlim,ylim,'LineStyle','--','color', 'k','linewidth',2.5)
+
+set(gca,'xlim',xlim,'xtick',xlim(1):nxbin:xlim(2),'ylim',ylim,'ytick',ylim(1):nybin:ylim(2),...
+'linewidth',2.125,'FontSize', 15,'FontName', 'Times');
+  
+ annotation('textbox', [0.65 0.16 0.1 0.1],...
+ 'String','(b)',...
+  'EdgeColor', 'none', 'FontSize', 15,'FontName', 'Times');
+ax2=gca;
+% print(gcf,'-djpeg','-r300',[FigName,'_2'])
+%{
+fnew = figure;
+ax1_copy = copyobj(ax1,fnew);
+subplot(1,2,1,ax1_copy)
+
+ax2_copy =  copyobj(ax2,fnew);
+subplot(1,2,2,ax2_copy)
+set(gcf,'PaperUnits', 'inches');
+set(gcf,'PaperSize', [4 2]);
+
+keyboard
+fig=gcf;
+ print(fig,'-djpeg','-r300',FigName)
+% print(fig,'-depsc2','-r300',['./figs/heatscatters_',FigName])
+% print(fig,'-dpng','-r300',['heatscatter_',FigName])
+                
+%}
+%
+function outfile = heatscatters(X, Y, numbins, tistrs,stats,markersize, marker, plot_colorbar, plot_lsf )
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% heatscatter(X, Y, outpath, outname, numbins, markersize, marker, plot_colorbar, plot_lsf, xlab, ylab, title)
+% mandatory:
+%            X                  [x,1] array containing variable X
+%            Y                  [y,1] array containing variable Y
+%            outpath            path where the output-file should be saved.
+%                                leave blank for current working directory
+%            outname            name of the output-file. if outname contains
+%                                filetype (e.g. png), this type will be used.
+%                                Otherwise, a pdf-file will be generated
+% optional:
+%            numbins            [double], default 50
+%                                number if bins used for the
+%                                heat3-calculation, thus the coloring
+%            markersize         [double], default 10
+%                                size of the marker used in the scatter-plot
+%            marker             [char], default 'o'
+%                                type of the marker used in the scatter-plot
+%            plot_colorbar      [double], boolean 0/1, default 1
+%                                set whether the colorbar should be plotted
+%                                or not
+%            plot_lsf           [double], boolean 0/1, default 1
+%                                set whether the least-square-fit line
+%                                should be plotted or not (together with
+%                                the correlation/p-value of the data
+%            xlab               [char], default ''
+%                                lable for the x-axis
+%            ylab               [char], default ''
+%                                lable for the y-axis
+%            title              [char], default ''
+%                                title of the figure
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+    %%%% mandatory
+    if ~exist('X','var') || isempty(X)
+        error('Param X is mandatory! --> EXIT!');
+    end
+    if ~exist('Y','var') || isempty(Y)
+        error('Param Y is mandatory! --> EXIT!');
+    end
+%     if ~exist('outpath','var')
+%         error('Param outpath is mandatory! --> EXIT!');
+%     end
+%     if ~exist('outname','var') || isempty(outname)
+%         error('Param outname is mandatory! --> EXIT!');
+%     end
+    
+    %%%% optional
+    if ~exist('numbins','var') || isempty(numbins)
+        numbins = 20;
+    else
+        % force number, not char input
+        numbins = str2double(numbins);
+    end
+    if ~exist('markersize','var') || isempty(markersize)
+        markersize = 50;
+    else
+        % force number, not char input
+        markersize = str2double(markersize);
+    end
+    if ~exist('marker','var') || isempty(marker)
+        marker = '.';
+    end
+    if ~exist('plot_colorbar','var') || isempty(plot_colorbar)
+        plot_colorbar = 1;
+    end
+    if ~exist('plot_lsf','var') || isempty(plot_lsf)
+        plot_lsf = 1;
+    end
+    if ~exist('tistrs','var') || isempty(tistrs)
+        tistrs ={'','',''} ;
+    end
+    if ~exist('stats','var') || isempty(stats)      
+		[r,p] = corr(X, Y);
+		str = {sprintf('corr: %.3f', r), sprintf('pval: %d', p)};
+		else
+		str=stats;
+	 end
+    [values, centers] = hist3([X Y], [numbins numbins]);
+%     disp([min(values(:)),max(values(:))])
+
+    centers_X = centers{1,1};
+    centers_Y = centers{1,2};
+%     disp([min(centers_X),max(centers_X)])
+%     disp([min(centers_Y),max(centers_Y)])
+
+    
+    binsize_X = abs(centers_X(2) - centers_X(1)) / 2 ;
+    binsize_Y = abs(centers_Y(2) - centers_Y(1)) / 2 ;
+    bins_X = zeros(numbins, 2);
+    bins_Y = zeros(numbins, 2);
+
+    for i = 1:numbins
+        bins_X(i, 1) = centers_X(i) - binsize_X;
+        bins_X(i, 2) = centers_X(i) + binsize_X;
+        bins_Y(i, 1) = centers_Y(i) - binsize_Y;
+        bins_Y(i, 2) = centers_Y(i) + binsize_Y;
+    end
+%     disp([bins_X;bins_Y])
+    scatter_COL = zeros(length(X), 1);
+
+    onepercent = round(length(X) / 100.);
+    
+    fprintf('Generating colormap...\n');
+    
+    for i = 1:length(X)
+
+        if (mod(i,onepercent) == 0)
+            fprintf('.');
+        end            
+
+        last_lower_X = NaN;
+        last_higher_X = NaN;
+        id_X = NaN;
+
+        c_X = X(i);
+        last_lower_X = find(c_X >= bins_X(:,1));
+        if (~isempty(last_lower_X))
+            last_lower_X = last_lower_X(end);
+        else
+            last_higher_X = find(c_X <= bins_X(:,2));
+            if (~isempty(last_higher_X))
+                last_higher_X = last_higher_X(1);
+            end
+        end
+        if (~isnan(last_lower_X))
+            id_X = last_lower_X;
+        else
+            if (~isnan(last_higher_X))
+                id_X = last_higher_X;
+            end
+        end
+
+        last_lower_Y = NaN;
+        last_higher_Y = NaN;
+        id_Y = NaN;
+
+        c_Y = Y(i);
+        last_lower_Y = find(c_Y >= bins_Y(:,1));
+        if (~isempty(last_lower_Y))
+            last_lower_Y = last_lower_Y(end);
+        else
+            last_higher_Y = find(c_Y <= bins_Y(:,2));
+            if (~isempty(last_higher_Y))
+                last_higher_Y = last_higher_Y(1);
+            end
+        end
+        if (~isnan(last_lower_Y))
+            id_Y = last_lower_Y;
+        else
+            if (~isnan(last_higher_Y))
+                id_Y = last_higher_Y;
+            end
+        end
+%         disp([num2str(id_X),' ',num2str(id_Y),' ',num2str(values(id_X, id_Y))])
+        scatter_COL(i) = values(id_X, id_Y);
+        
+    end
+    disp([min(scatter_COL),max(scatter_COL)])
+    fprintf(' Done!\n');
+    
+    fprintf('Plotting...');
+    
+    f = figure();
+    %colormap(jet)
+     load BlAqGrYeOrReVi200.rgb %BlGrYeOrReVi200.rgb
+     colormap(BlAqGrYeOrReVi200/255.) %(BlGrYeOrReVi200/255.)
+    
+    scatter(X, Y, markersize, scatter_COL, marker);
+	ax = gca;
+	box(ax,'on')
+    
+    if (plot_colorbar)
+        colorbar;      
+    end
+    
+    if (plot_lsf)
+        %[r,p] = corr(X, Y);
+        %str = {sprintf('corr: %.3f', r), sprintf('pval: %d', p)};
+        l = lsline;
+        set(l, 'Color', 'r','LineStyle','-','linewidth',2.5);
+        %txt=annotation('textbox', [0.14 0.80 0.1 0.1], 'String', str, 'EdgeColor', 'none');
+        %set(txt, 'FontSize', 12.5,'fontweight','bold')
+    end
+         
+        xlabel(tistrs(1));        
+        ylabel(tistrs(2));     
+        title(tistrs(3));
+  
+end
+%}
+ %statistics =  cellstr(num2str([Bias;avg;RMSE;Std;Corr;N]))
+ %axis([xlim,ylim],'linewidth',2.5,'FontSize', 16,'fontweight','bold')
+ %{
+x=random('Normal',282,14,5000*4,1);
+y=random('Normal',278,12,5000*4,1);
+heatscatters(x,y)
+%}

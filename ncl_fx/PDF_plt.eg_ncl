@@ -1,0 +1,81 @@
+undef("PDF_plt") 
+function PDF_plt(wks:graphic,data[*]:numeric\
+                ,tiXstr[*]:string,opt)
+local res,plot,nbin,PDFOPT,plres,xvalues,plx,ply,iply
+begin      
+            
+			    bnd = opt@bnd
+                nbin = round(((max(data)-min(data))/opt@binsz),3)
+                print("nbin: "+nbin)
+                PDFOPT  = True
+                PDFOPT@bin_nice = True
+                zpdf = pdfx(data,nbin, PDFOPT) 
+                refc = opt@refc
+                
+ 
+
+            res  = True
+            res@gsnDraw                = False
+            res@gsnFrame               = False
+            res@xyLineThicknessF       = 2.75
+            res@xyDashPattern          = opt@xydash
+                res@trXMinF	=  bnd(0)
+                res@trXMaxF	=  bnd(1)
+                 
+           
+            
+            res@tmBorderThicknessF= 4.0
+ 	        res@tmLabelAutoStride = True                      
+ 	        res@tmYROn            = False
+ 	        res@tmXTOn            = False
+ 	        res@tmYLMinorOn       = False
+			 
+			res@trYMaxF           = bnd(2)
+ 	        ;res@tmXBMinorOn       = False
+
+            res@tmXBMajorThicknessF     = 4
+            res@tmYLMajorThicknessF  	= 4
+             
+            res@tmXBLabelFontThicknessF = 4
+            res@tmYLLabelFontThicknessF = 4
+            res@tmXBLabelFontHeightF    = 0.025
+            res@tmYLLabelFontHeightF    = 0.025
+            res@tmXBLabelFontAspectF     = 1.2
+            res@tmYLLabelFontAspectF     = 1.2
+
+            res@tmYLLabelDeltaF   = -0.55
+            res@tmXBLabelDeltaF   = -0.55
+            
+            res@tiYAxisString          = tiXstr(0)
+		    res@tiXAxisString          = tiXstr(1)
+			res@tiXAxisOffsetYF        = 0.01
+			res@tiYAxisOffsetXF        = 0.02
+            
+            plot = gsn_csm_xy (wks, zpdf@bin_center, zpdf, res)
+            
+           if opt.ne.0 then
+
+            getvalues plot
+                "trYMinF":trYMinF
+            end getvalues
+            plres =True
+           
+            plres@gsLineThicknessF = 2.75
+            plres@gsLineDashPattern= opt@plydash
+
+
+            xvalues = opt@ref
+            ply     = (/trYMinF,res@trYMaxF/)
+            
+            
+            do iply= 0, dimsizes(xvalues)-1
+                plres@gsLineColor      = refc(iply)
+                plx = (/xvalues(iply),xvalues(iply)/)                
+                plot@$unique_string("plyl")$ = gsn_add_polyline(wks, plot, plx, ply, plres)                
+            end do;iply
+
+            
+            end if
+            return(plot)
+            
+           end

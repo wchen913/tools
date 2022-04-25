@@ -1,0 +1,142 @@
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+
+begin
+;************************************************************************
+; For binary files 
+; one record includes all of the daily or monthly data
+; old:xiaolei's version
+; new:reprocessed MODIS data (Yingtao)
+; DX :the bias corrected data of merging DX and MODIS data (Banglin)
+; STs:"IO";"China";"TWP";"FLO"  ;"RAMA";"TWP";"TAO";"Brazil";"FLO";"China"	 
+;************************************************************************ 
+;------ head
+	 vName		= "ssda"
+
+	 Sat        = "MODIS"
+     timeRes    = "daily";"monthly"  
+     UNDEF 	 	= -9999.
+
+	 St			= "SURFRAD";"BSRN";"TAO";"RAMA"
+     yrStrt     = 2014
+     yrEnd      = 2015   
+    ;pthin     = "/data/srb3/wchen/MODIS/SW_SRB/Results/case_1deg_Reprocess/diff_vars/"
+	pthin     	= "/data/srb8/wchen/SW/1deg/result/comb/"
+
+;------ Parameters      
+	longname      = "UMD surface fluxes at "+St+"sites" 
+	datatype 	= "float"
+	units	 	= "(W M~S~-2~N~)"   
+;++ Flags
+    yrevFlag = True    
+    svFlag   = True
+;++ Geo Info  
+	nLat	 = 180
+	nLon	 = 360 
+	geoinfo  = (/-89.5,89.5,-179.5,179.5/)
+	dimsz	 = (/nLat,nLon/)
+	dimNames = (/"lat","lon"/)
+	Lat      = fspan(geoinfo(0),geoinfo(1),nLat)
+    Lon      = fspan(geoinfo(2),geoinfo(3),nLon)
+  
+   if St.eq."TWP" then
+       region  = St
+       StLat = (/-0.521,-12.425,-2.061/)
+	   StLon = (/166.9167,130.891,147.4254/)
+    end if
+	if St.eq."SURFRAD" then
+       	region  = St
+    	StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    	StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    	stid  = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+    end if
+ 	if St.eq. "BSRN"
+ 	  region  = St
+ 	  ;StLon = (/167.731,169.689,-156.607,153.983/)
+ 	  ;StLat = (/   8.72,-45.045,  71.323, 24.288/)
+ 	  ;stid  = (/"kwa","lau","bar","mnm"/)
+      lines  = asciiread("./AllBSRNinfo.txt",-1,"string")
+	  nline  = dimsizes(lines)
+	  tmp    = reshape(lines,(/3,nline/3/))
+	  stid   = tmp(0,:)
+	  StLat  = stringtofloat(tmp(1,:))
+	  StLon  = stringtofloat(tmp(2,:))
+	  print(stid+"   "+StLat+"    "+StLon)
+      delete(tmp)
+     end if
+     
+     
+    nSt      = dimsizes(StLon)
+    do iyr = yrStrt,yrEnd
+    	fname		= vName+"_MODIS_SRB_daily_"+iyr+"_"+iyr+".dat" 
+;++ Time Stamps    
+  		time  = yyyymmdd_time(toint(iyr), toint(iyr), "integer")
+  		ntime = dimsizes(time)
+
+  		data          = new(dimsz,datatype,UNDEF)
+  		
+;------------------------- 
+;------ Extract Data -----  		 		
+		print(pthin+fname)	
+   		do iSt	= 0,nSt-1;68,68;
+   			data_out	  = new((/ntime/),datatype,UNDEF)
+  			data_out!0 	  = "time"
+  			data_out&time = time
+	 		indlat	= ind(Lat.ge.StLat(iSt)-0.5.and.Lat.le.StLat(iSt)+0.5)
+     		indlon = ind(Lon.ge.StLon(iSt)-0.5.and.Lon.le.StLon(iSt)+0.5)
+    		if (.not.all(ismissing(indlat)) ).and.(.not.all(ismissing(indlon))) then
+				print(Lat(indlat))
+        		print(Lon(indlon))
+    			tmp = new((/ntime,dimsizes(indlat),dimsizes(indlon)/),datatype,UNDEF)
+				print("extract data")   
+	  			do itime = 0,ntime-1
+        			data	= fbindirread(pthin+fname,itime,dimsz,datatype)
+		  			replace_ieeenan(data,UNDEF,0)
+		  			if yrevFlag then
+           			data=data(::-1,:)
+          			end if ;if yrevFlag
+        			data    = addmeta(data,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+        			data@_FillValue  = UNDEF	
+        			do itlat = 0,dimsizes(indlat)-1
+         			do itlon = 0,dimsizes(indlon)-1
+            			tmp(itime,itlat,itlon)=data(indlat(itlat),indlon(itlon))
+         			end do ;do itlon
+        			end do  ;do itlat
+	  			end do    ;do itime
+	  			if (dimsizes(indlat).gt.1).or.(dimsizes(indlon).gt.1) then
+		    		rad    	= 4.0*atan(1.0)/180.0
+            		wgty	= cos(Lat(indlat)*rad)
+        			temp    = wgt_areaave_Wrap(tmp,wgty,1.0,0)
+					delete(wgty)
+            		delete(tmp)
+					tmp	    = temp
+					delete(temp)
+	  			end if ;dimsizes(indlat)
+	  			data_out(:)=(/tmp/)
+	  			delete(tmp)
+			else
+				print("Can't not find grid near Site")
+				exit
+			end if ;if (.not.all(ismissing(indlat)) )
+			delete(indlat)
+			delete(indlon)
+			printVarSummary(data_out)
+   		    printMinMax(data_out,True)	
+   		    if svFlag then
+				print("Output Data")
+				outpth	= "./"
+				ofname = vName+"_"+Sat+"_061_SRB_4_"+St+"_"+stid(iSt)+"_"+\
+			         timeRes+"_"+iyr+".dat"			 
+        		print(outpth+ofname)
+	       		;exit	 
+				delete(data_out@_FillValue)
+				system("/bin/rm -f "+outpth+ofname)
+    			fbindirwrite(outpth+ofname,data_out)
+			end if 
+			delete(data_out) 
+   		end do ;do iSt
+   		delete(time)	
+	end do;iyr
+		
+		
+end

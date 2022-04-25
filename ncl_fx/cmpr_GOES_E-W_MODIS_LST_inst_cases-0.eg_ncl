@@ -1,0 +1,262 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/ccm_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl"
+load "$nclfx/addmeta.ncl"
+load "/data/srb1/wchen/tools/ncl_fx/substring.ncl"
+load "./US_Map_plt.ncl"
+load "./Hist_plt.ncl"
+load "./Scatter_plt.ncl"
+begin
+;*******************************
+; For binary files 
+;******************************* 
+;------ head
+
+	yyyy     = "2004"
+	mm       = "08"
+	dd       = "29"
+	hh       = "18"
+    MODmnt   = ""   
+    ialg	 = 1
+    diffxy   = "GE-M";"GW-M";"W-E";
+ 
+
+   wkstype   = "eps";"x11"
+   
+
+   nStd     = 3  ;ourlier remove 
+   clim     = (/270,325,2.5/);(/cmin,cmax,cinterval/)
+   hists    = (/200,400,41,10/);(xstart,xend,xinterval,npct)
+   npct     = 4
+;+++ Flags
+    lstEFlag     = True
+    lstWFlag     = True
+    lstMFlag     = True
+    diffFlag     = True
+    
+
+    pltFlagLstE  = True
+    pltFlagLstW  = True
+    pltFlagLstM  = False
+        
+    pltFlagDiff  = True
+    outlierFlag  = False
+    
+    CapFlag      = True
+ 
+;+++ Parameters 
+    pltpth    = "~/WORK/LST/Figures1/Figs_LST_GOES_EandW_MOD/";"~/WORK/LST/";
+    
+    UNDEF      = -999.
+    nLat	   = 501
+	nLon	   = 1101
+	geoinfo  = (/25,50,-125.,-70/)
+	dimsz	   = (/nLat,nLon/)
+	dimNames = (/"lat","lon"/)
+	datatype = "float"
+	units	   = "(K)"
+	nrec	   = 0
+	
+ 	;QCm      		= "" ; QC method
+	algs    	      = (/"skm.i.WisEmis_MERRA2",\         ;0
+				          "skm.i.RTTOV_MERRA2_LUT"/)       ;1
+	tistr =""
+	lftstr=""
+	rgtstr=""
+;+++ Path & file names 
+if lstEFlag then
+        satName   = "G12"
+	    mnt       = "15" 
+		pthin     = "/data/srb2/wchen/LST/GOES_E/output/"+yyyy+"_all/"+yyyy+mm+"/"
+        ;e.g. 2004_01_01_0315_skm.i.RTTOV_MERRA2_LUT
+ 		filename  = yyyy+"_"+mm+"_"+dd+"_"+hh+mnt+"_"+algs(ialg)
+ 		;pthin     = "/data/srb2/wchen/LST/cases/"
+ 		;e.g. lst_G12_2004061117_skm.i.RTTOV_MERRA2_LUT
+ 		;filename  = "lst_"+satName+"_"+yyyy+mm+dd+hh+"_"+algs(ialg)
+		longname  = str_upper(satName)+" LST"
+ 		wksnameE   = satName+"_LST_"+filename
+;+++ Put in lstE
+       print("read in data of "+filename)
+	   lstE  = new(dimsz,datatype)
+	   lstE  = fbindirread(pthin+filename,0,dimsz, datatype)	
+	   lstE  = where(lstE.le.220,UNDEF,lstE) 		       
+		replace_ieeenan(lstE,UNDEF,0)	 
+	   lstE@_FillValue =UNDEF
+	  
+	   printMinMax(lstE,True)
+	   lstE     = addmeta(lstE,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+       printVarSummary(lstE)
+     
+end if;lstEFlag
+
+;+++ Put in lstW
+if lstWFlag then
+        satName   = "G10"
+	    mnt       = "30" 	   
+	    pthin     = "/data/srb2/wchen/LST/GOES_W/output/"+yyyy+"_all/"+yyyy+mm+"/"
+        ;e.g. 2004_01_01_0330_skm.i.RTTOV_MERRA2_LUT
+ 		filename  = yyyy+"_"+mm+"_"+dd+"_"+hh+mnt+"_"+algs(ialg)
+		longname  = str_upper(satName)+" LST"
+ 		wksnameW   = satName+"_LST_"+filename
+        print("read in data of "+filename)
+	    lstW  = new(dimsz,datatype)
+	    lstW  = fbindirread(pthin+filename,0,dimsz, datatype)
+	    lstW  = where(lstW.le.220,UNDEF,lstW) 		       	 		       
+		replace_ieeenan(lstW,UNDEF,0)	 
+	    lstW@_FillValue =UNDEF
+	    printMinMax(lstW,True)
+	    lstW     = addmeta(lstW,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+	    printVarSummary(lstW)
+	    
+
+end if;lstWFlag
+
+
+;+++Put in lstM
+if lstMFlag then
+   satName   = "mod11"
+   mnt       = MODmnt 	
+   pthin = "/data/srb2/wchen/LST/cases/"
+  ;e.g.lst_mod11_0408041640
+  filename  = "lst_"+satName+"_"+substring(yyyy,2,3)+mm+dd+hh+mnt
+  longname  = str_upper(satName)+" LST"
+  wksnameM  = str_upper(filename)
+  lstM      = new(dimsz,datatype)
+  lstM      = fbindirread(pthin+filename,0,dimsz, datatype)
+  lstM      = lstM(::-1,:)
+  lstM      = where(lstM.le.0,UNDEF,lstM) 	
+  replace_ieeenan(lstM,UNDEF,0)
+  lstM@_FillValue =UNDEF
+  lstM   = addmeta(lstM,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+  printMinMax(lstM,True)
+ ;printVarSummary(lstM)
+
+end if ;lstMFlag
+
+;+++LST map plot
+if pltFlagLstE then
+        satName = "GOES-E"
+		lstE = where(ismissing(lstM),UNDEF,lstE)
+      if CapFlag then
+            rgtstr  = yyyy+"/"+mm+"/"+dd+" UTC "+hh+":"+mnt
+            lftstr  = "LST_"+str_upper(satName)+"_"+substring(algs(ialg),6,-1)+"_005"
+      end if;CapFlag
+      US_Map_plt(lstE,clim,wkstype,pltpth,"sMAP_"+wksnameE,"BlGrYeOrReVi200",tistr,lftstr,rgtstr,0)
+      Hist_plt_value(ndtooned(lstE),hists,wkstype,pltpth,"sHist_"+wksnameE,"ncview_default",lftstr,0)
+end if ;pltFlagLstE
+if pltFlagLstW then
+        satName = "GOES-W"
+		lstW = where(ismissing(lstM),UNDEF,lstW)
+	    if CapFlag then
+            rgtstr  = yyyy+"/"+mm+"/"+dd+" UTC "+hh+":"+mnt
+            lftstr  = "LST_"+str_upper(satName)+"_"+substring(algs(ialg),6,-1)+"_005"
+        end if;CapFlag
+        US_Map_plt(lstW,clim,wkstype,pltpth,"sMAP_"+wksnameW,"BlGrYeOrReVi200",tistr,lftstr,rgtstr,0)
+        Hist_plt_value(ndtooned(lstW),hists,wkstype,pltpth,"sHist_"+wksnameW,"ncview_default",lftstr,0)
+end if ;pltFlagLstW
+if pltFlagLstM then
+        satName = "MOD11"
+     ;hists    = (/200,400,41,5/)
+      if CapFlag then
+            rgtstr  = yyyy+"/"+mm+"/"+dd+" UTC "+hh;+":"+mnt
+            lftstr  = wksnameM
+      end if;CapFlag
+      US_Map_plt(lstM,clim,wkstype,pltpth,"sMAP_"+wksnameM,"BlGrYeOrReVi200",tistr,lftstr,rgtstr,0)
+      Hist_plt_value(ndtooned(lstM),hists,wkstype,pltpth,"sHist_"+wksnameM,"ncview_default",lftstr,0)
+end if ;pltFlagLstE
+;+++ lst difference 
+if diffFlag then
+    wksname   = str_upper(diffxy)+"_LST_"+yyyy+mm+dd+"_"+hh+"_"+algs(ialg)
+    wksname1  = str_upper(diffxy)+"_LST_"+yyyy+mm+dd+"_"+hh+"_"+algs(ialg)
+    if lstEFlag .and. lstWFlag.and.(diffxy.eq."W-E") then
+        longname  = "LST difference between GOES-E and GOES-W" 
+        x=lstE 
+        y=lstW
+    end if ;stEFlag .and. lstWFlag 
+    if lstMFlag.and.lstEFlag .and. lstWFlag.and.(diffxy.eq."GE-M".or.diffxy.eq."GW-M") then
+       lstE= where(ismissing(lstW).or.ismissing(lstM),UNDEF,lstE)
+       lstW= where(ismissing(lstE).or.ismissing(lstM),UNDEF,lstW)
+       lstM= where(ismissing(lstE).or.ismissing(lstW),UNDEF,lstM)
+        if diffxy.eq."GE-M" then
+            longname  = "LST difference between GOES-E and MOD11" 
+            x=lstM 
+            y=lstE
+        else if diffxy.eq."GW-M" then
+            longname  = "LST difference between GOES-W and MOD11" 
+            x=lstM 
+            y=lstW
+        end if; GW-M
+        end if; GE-M
+    end if ;lstMFlag.and.lstEFlag .and. lstWFlag
+        x@_FillValue = UNDEF
+        y@_FillValue = UNDEF
+        x=where(ismissing(y),UNDEF,x)
+        y=where(ismissing(x),UNDEF,y)
+       
+        x1d  = ndtooned(x)
+        y1d  = ndtooned(y)
+        x1d@_FillValue = UNDEF
+        y1d@_FillValue = UNDEF
+        x1d@long_name  = x@long_name
+        y1d@long_name  = y@long_name
+        printVarSummary(x1d)
+        
+        diff    = y-x
+        diff    = addmeta(diff,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+        printVarSummary(diff)
+        printMinMax(diff,True) 
+         
+	    Corr = escorc(ndtooned(y),ndtooned(x))
+        Bias = avg(diff)
+        N    = num(.not.ismissing(diff))
+        Std  = stddev(diff)
+        RMS   = dim_rmsd(ndtooned(y),ndtooned(x))
+        avgval= avg(x)
+        Nstr = "N = "+N         
+    if outlierFlag then
+           dof     = N
+           inds    = ind(abs(ndtooned(diff)).gt.(nStd*Std))
+         if .not.all(ismissing(inds)) then           
+           x1d(inds)  = UNDEF          
+           y1d(inds)  = UNDEF
+           avgval=avg(x1d)          
+           delete(inds)
+           diff1d    = y1d-x1d         
+           diff      = (/onedtond(diff1d,dimsz)/)
+           npositive       = dimsizes(ind(ndtooned(diff).gt.0))
+           nnegtive        = dimsizes(ind(ndtooned(diff).lt.0)) 
+           Corr = escorc(y1d,x1d)
+           Bias = avg(diff)
+           N    = num(.not.ismissing(diff))
+           Std  = stddev(diff)
+           RMS  = dim_rmsd(y1d,x1d) ;sqrt(avg(diff^2) )
+           Nstr = "N = "+N +" ("+sprintf("%.1f",abs(tofloat(N)/tofloat(dof)*100.))+"%)"
+           delete(diff1d)
+          ;delete(x1d)
+          ;delete(y1d)
+         end if ;not
+    end if ;outlierFlag
+    print(Corr+" "+Std)    
+    if pltFlagDiff then       
+	   if CapFlag then
+            rgtstr  = yyyy+"/"+mm+"/"+dd+" UTC "+hh
+            lftstr  = "LST_DIFF_"+str_upper(diffxy)+"_"+substring(algs(ialg),6,-1)+"_005"
+      end if;CapFlag
+      statstr = (/"Corr = "+sprintf("%.2f",Corr),\
+                  "Bias = "+sprintf("%.2f",Bias)+" ("+sprintf("%.1f",abs((Bias/avgval)*100.))+"%)",\
+                  "Std ="+ sprintf("%.2f",Std)+" ("+ sprintf("%.1f",abs(Std/avgval*100))+"%)",\
+                  "RMS = "+sprintf("%.2f",RMS)+" ("+sprintf("%.1f",abs((RMS/avgval)*100.))+"%)",\
+                  Nstr/)
+      US_Map_plt(diff,(/-10,10,0.5/),wkstype,pltpth,"MAP_diff_"+wksname,"BlueWhiteOrangeRed",tistr,lftstr,rgtstr,0)
+      Hist_plt_diff_temp(ndtooned(diff),npct,statstr,wkstype,pltpth,"Hist_diff_"+wksname,lftstr,0)
+      ;Scatter_plt_NoStats(x1d,y1d,hists(0:1),wkstype,pltpth,"Scatter_"+wksname,"blue",tistr,x1d@long_name,y1d@long_name,0)   
+    end if; pltFlagDiff
+end if ;diffFlag
+
+print("done")
+ 
+end
+ 

@@ -1,0 +1,148 @@
+
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/calendar_decode2.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/substring.ncl"
+load "$nclfx/zenith.ncl"
+load "$nclfx/heatscatter.ncl"
+load "$nclfx/attach_labelbar.ncl"
+begin
+;-------------------------------
+;Adding cloud mask has some 
+;improvement for 2004
+;*******************************
+; specification and data put in 
+;*******************************  
+;DRA: Time difference 8h
+;++++ Head +++++
+    
+    vName    = "dtr_clim" 
+    
+  ;++++++ Plot Parameters  ++++++
+    wkstype     = "eps";"x11"; "pdf";
+    wksname = str_upper(vName)+"_GOES_vs_Sts"
+
+        
+    pubFlag     = True
+	 
+    pth	    = "./data/"
+    pltpth  = "./figs/"
+    
+    fname1      = pth+"DTR_Clim_GOES_ARM_SGPC1.nc"
+    fname2      = pth+"DTR_Clim_GOES_SURFRAD_DRA.nc"
+ 
+    f1   = addfile(fname1,"r")
+    data1 = f1->$vName$
+    
+    f2   = addfile(fname2,"r")   
+    if pubFlag then
+        varName = vName+"_smooth"
+        data2 = f2->$varName$
+    else
+        data2 = f2->$vName$
+    end if
+    
+    
+    	 xlim	=(/0,23/)
+         ylim	= (/270,315/)
+         
+          xlabel = "Hour"
+          ylabel = "LST (K)"
+         
+  
+      
+        wks = gsn_open_wks(wkstype,pltpth+"Line_DTR_"+wksname)
+        res = True
+        res@gsnDraw            = False        
+        res@gsnFrame           = False         
+        res@gsnMaximize        = True
+
+       ;res@tiMainString       = capStr
+        res@tiMainFontHeightF  = 0.02
+
+        res@trXMinF = xlim(0)
+        res@trXMaxF = xlim(1)
+        res@trYMinF = ylim(0)
+        res@trYMaxF = ylim(1)
+
+        res@tmXBMajorThicknessF     = 4
+        res@tmYLMajorThicknessF     = 4
+        res@tmXBLabelFontThicknessF = 4
+        res@tmYLLabelFontThicknessF = 4
+
+        res@tmXBMode          = "Manual"
+        res@tmXBTickSpacingF  = 6
+
+        res@tmBorderThicknessF= 4.0
+        res@tmLabelAutoStride = True
+        res@tmYROn            = False
+        res@tmXTOn            = False
+        res@tmYLMinorOn       = False
+        res@tmXBMinorOn       = False
+        res@tmXBLabelFontHeightF    = 0.03
+        res@tmYLLabelFontHeightF    = 0.03
+
+        res@tmYLLabelDeltaF   = -0.7
+        res@tmXBLabelDeltaF   = 0.2
+
+        res@tiYAxisString         = ylabel
+        res@tiYAxisOffsetXF       = 0.0175
+        res@tiYAxisFontThicknessF = 5
+        res@tiYAxisFontHeightF    = 0.03
+        res@tiXAxisString         = xlabel
+        res@tiXAxisOffsetYF       = 0.025
+        res@tiXAxisFontThicknessF = 5
+        res@tiXAxisFontHeightF    = 0.03
+
+        res@xyDashPattern  = 0 
+        res@xyLineThicknessF = 4.
+        res@xyLineColors := (/"blue","red","green"/) ; 
+        res@xyMarkLineMode = "MarkLines"               
+        res@xyMarkers      = (/6,11,9/)               
+        res@xyMarkerColors := (/"blue","red","green"/)  
+        res@xyMarkerThicknessF = 2.5
+        res@xyMarkerSizeF     = 0.008    
+        res@pmLegendDisplayMode    = "Always"           
+
+        res@pmLegendSide           = "Top"               
+        res@pmLegendParallelPosF   = .2                 
+        res@pmLegendOrthogonalPosF = -0.3              
+
+        res@pmLegendWidthF         = 0.075                
+        res@pmLegendHeightF        = 0.14              
+        res@lgLabelFontHeightF     = .015  
+
+        res@lgLabelOffsetF         = 0.1  
+       ;res@lgLabelJust            ="centerright"            
+        res@lgOrientation          = "vertical"
+        res@lgPerimOn              = False               
+        res@xyExplicitLegendLabels = (/"Observed","GOES-E","GOES-W"/)
+
+        plot = gsn_csm_y(wks,data2,res)
+        res@xyDashPattern  = 14 
+        plot1 = gsn_csm_y(wks,data1,res)
+        overlay(plot,plot1)
+        draw(plot)
+;**************************************************************
+; Draw the legend, indicating the number of items, a label for each
+; item, and the X, Y position of the legend in NDC coordinates.
+;**************************************************************
+        lgres                    = True
+        lgres@lgLineColors       = (/"black","black"/)    
+        lgres@vpWidthF           = 0.25                   
+        lgres@vpHeightF          = 0.1 
+        lgres@pmLegendWidthF         = 0.075                
+       ;lgres@pmLegendHeightF        = 0.14    
+        lgres@lgLabelFontHeightF    = .1
+        lgres@lgLabelFontThicknessF = 4. 
+        lgres@lgLabelOffsetF        = 0.1    
+       ;lgres@lgLabelJust        ="centerright"                                      
+        lgres@lgPerimOn          = False                    
+        lgres@lgDashIndexes      = (/0,14/)              
+        lgres@lgLineLabelStrings = (/"",""/)            
+        lgres@lgLineThicknessF   = 4.
+        gsn_legend_ndc(wks,2,(/"BSRN/DRA","ARM/SGPC1"/),0.675,0.325,lgres)
+        frame(wks)
+end
+    ;StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    ;StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    ;stNames= (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)

@@ -1,0 +1,51 @@
+
+%---------------------------------------------------------------------
+function [dayFlx] = ins2daily(...
+                    insFlx,latM,lonM,modis,year,doy, mu0Path,mu0PathSfx )
+%---------------------------------------------------------------------
+      
+      yyyy = num2str(year, '%04d');
+      ddd  = num2str(doy,  '%03d');
+
+      insFlx = reshape( insFlx, size(latM) );
+
+      %----- Normalize to a same solar zenith angle,
+      %      use daily average here.
+      %    * read mu0 from the input files. input file format:
+      % dM = cat( 3,...
+      %           cldLat, cldLon,...               %1,2
+      %           ctp, wfrc,wcre,wcod,...          %3,4,5,6
+      %                ifrc,icre,icod, tfrc,...    %7,8,9,10
+      %           aod, mu0, wtr, uo3, elv, prs, ...%11,12,13,14,15,16
+      %           single(sfc), alb );              %17,(18,19,20,21)
+      % dM = permute(dM,[3,1,2]); %[nVar,nLon,nLat]
+      %
+      mu0NumVars = 17+4; %input file number of vars. for reading mu0 from the input data file.
+      mu0FileName = [ mu0Path,'/',yyyy,mu0PathSfx,'/',modis,'/',...
+                      'modis.',modis,'.',yyyy,ddd,'.9999.input'];
+      fid = fopen(mu0FileName, 'r');
+         sz   = fread(fid, 2, 'int32');
+         MISG = fread(fid, 1, 'float32'); %=-9999.
+         dM   = fread(fid, mu0NumVars*sz(1)*sz(2),  'float32');
+      fclose(fid);
+      dM(dM==MISG)=NaN;
+
+      dM = reshape(dM, [mu0NumVars,sz(1),sz(2)]); %[nVars,nLon,nLat]
+      iMu0 = squeeze(dM(12,:,:)); %[nLon,nLat]
+      iMu0(iMu0<0.09)=NaN; %SRB's valid mu0>0.1
+
+      %--
+      odir=cd('~/srb/dev2/mshare/');
+         [dMu0,dLen,Rsun] = dailyMu0(latM, doy);
+         %[iMu0] = instantMu0(...
+         %         latM, lonM, [ year,day(ifl),hor(ifl),mnt(ifl),0 ]);
+         %iMu0(iMu0<0.09)=NaN; %SRB's valid mu0>0.1
+      cd(odir);
+      
+      %--
+      %rt = dMu0./iMu0*Rsun;
+      rt = dLen/2/pi;
+      dayFlx = rt.*insFlx; %[nLon,nLat], NaN filled.
+
+%keyboard
+end

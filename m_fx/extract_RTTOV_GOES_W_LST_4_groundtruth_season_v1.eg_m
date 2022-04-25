@@ -1,0 +1,164 @@
+
+ clear all; clc;
+% Extract GOES LST for Groundtruth locations
+%--- Head
+addpath('/data/srb1/wchen/tools/m_fx/','-end')
+   SatName = 'G10';
+   vName = 'LST';
+   
+   yr    = 2009; yrstr=num2str(yr);
+   ndays = 365;
+   mon   = [1:12];
+   minstr= '30';
+   
+   pltFlag = 'no';
+   optOut  = 'yes';
+   SavePlt = 'yes';
+   optTime = 'yes';
+   dynt    = 'dy' ; % dy (day) or nt (night)
+   svdata  = 'yes';
+   %--- Geo infomation
+   nLat=501;
+   nLon=1101;
+   goesRes = 0.05;
+%    goesLatNLim = 50;
+%    goesLatSLim = 25;
+%    goesLonWLim = -125;
+%    goesLonELim = -70;
+%    goesLat     = goesLatSLim:goesRes:goesLatNLim;
+%    goesLon     = goesLonWLim:goesRes:goesLonELim;
+%    
+   stlon = [-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62];
+   stlat = [  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73];
+   stid  = {   'dra', 'bon', 'gwn',  'fpk',   'tbl', 'psu', 'sxf'};
+   nst   = length(stlat);
+%---
+     if strcmpi(optTime,'yes')
+        tsstr = '0101';
+        testr = '1231';
+        mms   = floor(str2num(tsstr)/100);
+        dys   = str2num(tsstr)-mms*100;
+        mme   = floor(str2num(testr)/100);
+        dye   = str2num(testr)-mme*100;
+        doys  = date2doy(datenum(yr,mms,dys));
+        doye  = date2doy(datenum(yr,mme,dye));
+        mon   = [mms:mme];
+        
+     end
+%--- 00, 15,45 min after hour
+   minute =15; mntStr=num2str(minute,'%02d');
+   
+%% --- Loop
+for ist =1
+    stpth   = '/data/srb2/wchen/LST/SURFRAD_obtained/';
+    stfname = [num2str(yr),'_LST_SURFRAD_',upper(stid{ist}),'_Allday.dat'];
+%     stfname = [num2str(yr),'_LST_SURFRAD_',upper(stid{ist}),'_wins6_Allday.dat'];
+%       stfname = [num2str(yr),'_LST_SURFRAD_',upper(stid{ist}),'_day.dat'];
+    fid     = fopen([stpth,stfname],'r');
+    data0   = fread(fid,'float32');
+    fclose(fid);
+    data0(data0<-900)=NaN;
+
+
+   pltpth  = '~/WORK/LST/';
+   FigName = [pltpth,num2str(yr),'_LST_SURFRAD_',upper(stid{ist}),'_vs_',SatName,'_RTTOV-LUT'];
+%    FigName = [pltpth,num2str(yr),'_LST_SURFRAD_',upper(stid{ist}),'_vs_',SatName,'_RTTOV-LUT_wins6'];
+   if strcmpi(dynt,'dy') || strcmpi(dynt,'nt') 
+       FigName = [FigName,'_',dynt];
+   end
+   cont    = 0;
+    for imon  = mon
+        mmstr   = num2str(imon,'%02d');
+        dt      = eomday(yr,imon);
+        %filePath = ['/data/srb3/wchen/LST/GOES_E/output/2000/',yymm,'/']; 
+        %filePath ='/aosc/jetstor/ytma/dev3/RTTOV/inverse_crc/data/';
+        %filePath = '/aosc/jetstor/ytma/dev3/RTTOV/inverse_crc/data/umdLUT/';
+        %filePath = '/data/srb1/wchen/WORK/LST/RTTOV/measures_ytma_161020/data/2004_all/';
+         filePath = ['/data/srb2/wchen/LST/GOES_W/output/',yrstr,'_all/RTTOV/',yrstr,'_all/'];
+%         if imon==12
+%             dt=dt-1;
+%         end
+        for dyoi = [1:dt] 
+            dd=num2str(dyoi,'%02d');
+            for hroi = [0:23];
+                hh = num2str(hroi,'%02d');
+                
+                % **** input data ****
+                fileName = [filePath,'out_',mmstr,'/',SatName,'_tp4_',num2str(yr),...
+                            '_',mmstr,'_',dd,'_',hh,minstr,'.dat_RET.mat'];  
+                %  disp(fileName)
+                %  keyboard
+              if exist(fileName)   
+                invar  = load(fileName,'sRET');
+                datain   = invar.sRET.lst;
+                goesLat  = invar.sRET.lat(1,:);
+                goesLon  = invar.sRET.lon(:,1);
+%                 keyboard
+%                 if hroi==19 && (dyoi==1 || dyoi==31)
+%                     mfx_usmap_plot(dyoi,invar,[280 325])
+%                 keyboard
+%                 end
+                indlat = find(goesLat>=(stlat(ist)-goesRes/2.) & goesLat<=(stlat(ist)+goesRes/2.)); 
+                indlon = find(goesLon>=(stlon(ist)-goesRes/2.) & goesLon<=(stlon(ist)+goesRes/2.)); 
+              % disp(goesLat(indlat))
+              % disp(goesLon(indlon))
+                if ~isempty(indlat) && ~isempty(indlon)
+                    if length(indlat)==1 && length(indlon)==1
+                        yy = squeeze(datain(indlon,indlat));   
+                    end % if length(indlat)
+                    if length(indlat)>1 || length(indlon)>1 
+                        rad  = 4.0*atan(1.0)/180.0;
+                        wgty = cos(goesLat(indlat)*rad);
+                        wgty = repmat(wgty,[length(indlon),1]);
+                        wgtx = nan(length(indlon),length(indlat));
+                        wgtx(:,:)=1.0;
+                        wgt  = wgtx.*wgty;
+                        tmp  = datain(indlon,indlat);                      
+                        tmp  = wgt.*tmp;
+                        yy   = nanmean(tmp(:)); 
+                        clear tmp  wgt indlat indlon datain     
+                    end % if length(indlat)  
+                else    
+                    disp('---- can not find data around----');keyboard
+                end % if ~isempty 
+            %if hroi==18 
+            %   keyboard
+            %end 
+              else
+                   yy=NaN;
+             end % if exist(fileName)  
+             cont=cont+1;
+%              disp(yy);
+            if cont==1
+               data1 = yy;
+            else
+               data1 = [data1 yy];
+            end 
+            clear yy          
+            end %hori
+        end %dyoi
+    end %imon
+     
+        ndata1  = length(data1);       
+        data0   = reshape(data0,[24 ndays]);
+        data1   = reshape(data1,[24 ndata1/24]);  
+         if strcmpi(svdata,'yes')
+            datao=nan(24,ndays);
+            datao(:,1:ndays)=data1;
+            datao(isnan(datao))=-999.0;
+            estfname=[num2str(yr),'_GOES_W_RTTOV_LST_SURFRAD_',upper(stid{ist}),'_Allday.dat'];
+            fid     = fopen([stpth,estfname],'w');
+            fwrite(fid,datao,'float32');
+            fclose(fid);
+            clear datao
+%             keyboard
+        end
+		
+   
+       
+
+ 
+end %ist 
+    disp(cont)
+%keyboard
+

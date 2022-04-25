@@ -1,0 +1,383 @@
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/ccm_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/popRemap.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/skewt_func.ncl"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/wind_rose.ncl"
+load "$nclfx/addmeta.ncl"
+load "$nclfx/zenith.ncl"
+begin
+;*******************************
+; For binary files 
+;******************************* 
+;------ head
+;+++ Parameters 
+   yrstrt   = 2004
+   yrend    = 2009
+
+	sat      = "GOES_W"
+	site     = "SURFRAD";"ARM";"mesonet";
+	if sat.eq."GOES_E" then	
+	   mnt      = "15"
+	else
+	   mnt      = "30"
+	end if
+	iskm     = 2
+    
+  
+	
+;+++ Flags
+  
+    
+    svdata        = True 
+    
+    pltMap        = False
+    landmask      = True
+    watermask     = False
+    pltHist       = False 
+   
+    
+;+++ Parameters	
+    nHour    = 24    
+	nLat	 = 501
+	nLon	 = 1101
+    RES      = 0.05
+	geoinfo  = (/25,50,-125.,-70/)
+	dimsz	 = (/nLat,nLon/)
+	dimNames = (/"lat","lon"/)
+	datatype = "float"
+	units	 = "(K)"
+	nrec	 = 0
+    UNDEF  = -999.
+	skms  = (/"skm.i.11um_wv",\                ;0
+	          "skm.i.WisEmis_MERRA2",\         ;1
+              "skm.i.RTTOV_MERRA2_LUT",\       ;2
+			  "skm.i.proposedSplitWindow"/)    ;3
+				    
+    pth         = "/data/srb2/wchen/LST/"+sat+"/output/"
+    longname    =  str_upper(sat)+" LST"+" (UMD: "+skms(iskm) +")"
+   
+;+++ Sites settings
+if site .eq. "mesonet" then
+    facility    = ""
+	lines  = asciiread("/data/srb3/wchen/Groundtruth/SKT/stinfo.txt",-1,"string")
+	nline  = dimsizes(lines)
+	tmp    = reshape(lines,(/3,nline/3/))
+	stNames= tmp(0,:)
+	StLat  = stringtofloat(tmp(1,:))
+	StLon  = stringtofloat(tmp(2,:))
+	print(stNames+"   "+StLat+"    "+StLon)
+	delete(tmp)
+end if;site
+if site .eq. "ARM" then	
+     facility    = "sgpC1"
+	 StLat       = (/36.605/)
+	 StLon       = (/-97.485/)	
+end if ;site	 
+if site.eq."SURFRAD" then
+    facility    = ""
+    facilities  = (/   "DRA", "BON", "GWN",  "FPK",  "TBL", "PSU", "SXF"/)
+    StLon       = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    StLat       = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)    
+end if;if site
+	nSt        = dimsizes(StLat)
+	
+	;exit
+;+++ Time Coverage
+   yyyymmdd    = yyyymmdd_time(yrstrt,yrend,"integer")
+   yyyy        = toint(yyyymmdd/10000)
+   mmdd        = yyyymmdd-yyyy*10000
+   mm          = toint(mmdd/100)
+   dd          = mmdd-mm*100
+ 
+   delete(mmdd)
+   
+   ntime       = dimsizes(yyyymmdd)
+   print(ntime)
+   dataout     = new((/ntime,nHour,nSt/),datatype,UNDEF)
+   sza         = new((/ntime,nHour,nSt/),datatype,UNDEF)
+   dataout!0   = "ymd"
+   dataout!1   = "hour"
+   dataout!2   = "StId"
+   dataout&ymd = yyyymmdd
+   dataout&hour= fspan(0,23,24)
+   copy_VarCoords(dataout,sza)
+;---- Processing
+print("data processing")
+;+++ loop    
+ do itm=0,ntime-1
+    pthin     = pth+yyyy(itm)+"_all/"+yyyy(itm)+sprinti("%0.2i", mm(itm))+"/"
+  do hour=0,nHour-1
+   	;e.g. 2004_01_01_0215_skm.i.WisEmis_MERRA2          	
+ 		filename  = yyyy(itm)+"_"+sprinti("%0.2i", mm(itm))+"_"+sprinti("%0.2i", dd(itm))+"_"+\
+ 		            sprinti("%0.2i", hour)+mnt+"_"+skms(iskm)		
+	    print(filename)
+		doy   =  day_of_year(yyyy(itm),mm(itm),dd(itm))
+		jday   = (/doy+tofloat(hour*60+tofloat(mnt))/1440./)
+	   if (fileexists(pthin+filename)) then
+	       datain   = fbindirread(pthin+filename,0,dimsz, datatype) 
+	       replace_ieeenan(datain,UNDEF,0)
+	       datain   = where(datain.gt.0,datain,UNDEF)
+	       datain   = addmeta(datain,dimsz,dimNames,geoinfo,longname,units,-1,-1)
+	       printVarSummary(datain)
+	       Lat      = datain&lat
+	       Lon      = datain&lon
+	       do iSt        = 0,nSt-1		   
+            indlat  = ind(Lat.ge.StLat(iSt)-RES.and.Lat.le.StLat(iSt)+RES)
+            indlon  = ind(Lon.ge.StLon(iSt)-RES.and.Lon.le.StLon(iSt)+RES)
+            if (.not.all(ismissing(indlat)) ).and.(.not.all(ismissing(indlon))) then
+                print(Lat(indlat))
+                print(Lon(indlon))
+                tmp = new((/dimsizes(indlat),dimsizes(indlon)/),datatype,UNDEF)
+                print("extract data")
+                tmp=datain(indlat,indlon)
+                printMinMax(tmp,True)
+                if (dimsizes(indlat).gt.1).or.(dimsizes(indlon).gt.1) then
+                    rad  = 4.0*atan(1.0)/180.0
+                    wgty = cos(Lat(indlat)*rad)
+                    temp = wgt_areaave_Wrap(tmp,wgty,1.0,0)
+                    delete(wgty)
+                    delete(tmp)
+                    tmp      = temp
+                    delete(temp)
+                end if ;indlat gt 1
+                dataout(itm,hour,iSt)=(/tmp/)
+                delete(tmp)
+            else ;not missing indlat
+                print("Can't not find grid near Site")
+                dataout(itm,hour,iSt)=UNDEF
+           end if ;not missing indlat
+          delete(indlat)
+          delete(indlon)
+		  sza(itm,hour,iSt)  = zenith(jday,StLat(iSt),StLon(iSt))*(180./3.14159)  
+         end do ; do iSt
+	   else ;file exist
+	      dataout(itm,hour,:) = UNDEF
+		  sza(itm,hour,:) 	  = UNDEF		  
+	   end if;file exist	 
+	   
+       printVarSummary(dataout)
+       printMinMax(dataout,True)
+      
+      
+      
+   
+   end do ;hour
+  end do ; itm 
+   if svdata  then
+         print("Write NetCDF Data")
+         
+         lst = dataout
+         opth = "./";"/data/srb3/wchen/Groundtruth/SKT/"
+         fname = opth+"LST_"+sat+"_4_"+site+facility+"_"+nSt+"st"+"_inst_hourly_"+yrstrt+"_"+yrend+".nc"     
+         print(fname)
+        ;exit
+         system("/bin/rm -f "+fname)
+         fod                 = addfile(fname,"c")
+         fod->lst            = lst
+		 fod->sza            = sza
+         
+       delete(fod)
+       delete(lst)
+    end if ;svdata  
+;******************************************************
+;						 Plotting
+;******************************************************
+	
+;+++ MAP
+	if pltMap then
+	
+	      pltpth    = "~/WORK/LST/"
+	      wkstype   = "eps"
+	      wksname   = "LST_"+sat+"_"+yrstrt+"-"+yrend+"_"+sprinti("%0.2i", mon)+"_"+sprinti("%0.2i", hour)+mnt
+	      lftstr    = "Lake Huron"
+	      rtstr     = "UTC " + sprinti("%0.2i", hour)
+	      tistr     = "";"Climatology LST "+monstr(mon-1)+" UTC "+sprinti("%0.2i", hour)+":"+mnt+" ("+yrstrt+"-"+yrend+")" 
+	      clim      = (/255,275,1/);(/285,300,1/);(/275,310,1/);(/245,305,1/);(/245,305,1/);
+	      
+	      tmp   = data({43:47},{-85:-79})
+	      delete(tmp@long_name)
+	      delete(tmp@units)
+	      print("Map Plotting")
+   		wks = gsn_open_wks(wkstype, pltpth+"map_clim_"+wksname)
+   		gsn_define_colormap(wks,"BlGrYeOrReVi200")  ; choose a color map; MPL_jet
+  		   ;gsn_define_colormap(wks,"BlAqGrYeOrReVi200"); 
+
+   		res                     = True
+   		res@gsnMaximize         = True              
+   		res@gsnAddCyclic        = False           
+   		res@gsnSpreadColors     = True            
+  
+  
+   		res@cnFillOn            = True            
+   		;res@cnFillMode          = "RasterFill"        
+   		res@cnLinesOn           = False            
+   		res@cnInfoLabelOn       = False
+   		res@cnLineLabelsOn      = False
+
+   		res@cnLevelSelectionMode = "ManualLevels"   		
+   		res@cnMinLevelValF       = clim(0)
+   		res@cnMaxLevelValF       = clim(1)
+         res@cnLevelSpacingF      = clim(2)
+         
+   		res@pmTickMarkDisplayMode = "Always"       
+
+   		res@lbBoxLinesOn          = False            
+   		res@lbBoxSeparatorLinesOn = False
+   		res@lbLabelStride         = 5
+ 
+   		res@mpMinLatF             = min(tmp&lat);geoinfo(0)
+   		res@mpMaxLatF             = max(tmp&lat);geoinfo(1)
+   		res@mpMinLonF             = min(tmp&lon);geoinfo(2)
+   		res@mpMaxLonF             = max(tmp&lon);geoinfo(3)
+        
+         res@mpDataSetName               = "Earth..4"
+         res@mpDataBaseVersion           = "MediumRes";"HighRes";
+         res@cnFillDrawOrder             = "PreDraw"
+         res@mpOutlineOn                 = True
+         if watermask then
+            res@mpOceanFillColor            = "white"  
+            res@mpLandFillColor             = "transparent"
+            res@mpInlandWaterFillColor      = "white"
+            
+         end if   ;lsmask
+         if landmask then
+            res@mpOceanFillColor            = "transparent"  
+            res@mpLandFillColor             = "white"
+            res@mpInlandWaterFillColor      = "transparent"
+         end if   ;lsmask
+         ;res@mpGeophysicalLineThicknessF = 2
+         ;res@mpNationalLineThicknessF    = 2
+
+   		res@mpOutlineBoundarySets = "USStates" ;"AllBoundaries" ;   ; "National" 
+   		;res@gsnLeftStringOrthogonalPosF = -0.075
+         ;res@gsnRightStringOrthogonalPosF = -0.075
+         res@gsnLeftString  = lftstr
+         res@gsnRightString = rtstr
+        ;res@tiMainString   = tistr
+   		plot=gsn_csm_contour_map(wks,tmp,res)
+  		;draw(plot)
+  		;frame(wks)
+	end if;pltmap
+
+;+++ Histogram
+	if pltHist then
+	   print("Histogram Plotting")  
+	   
+      
+  		wks = gsn_open_wks(wkstype, pltpth+"Hist_"+wksname)
+  		;gsn_define_colormap(wks,"BlRe")
+      ;gsn_define_colormap(wks,"ncview_default")
+      gsn_define_colormap(wks,"BlGrYeOrReVi200")
+  		res1 = True
+      res1@gsnFrame                    = False
+      res1@gsnDraw                     = False
+
+      ;res1@gsnMaximize                 = True
+      res1@gsnHistogramBarWidthPercent = 100
+
+      ;res1@tmXBLabelStride             = 20
+      ;res1@gsnHistogramNumberOfBins    = 20
+      ;res1@gsnHistogramComputePercentages= True ;Missing Values included
+      ;res1@gsnHistogramComputePercentagesNoMissing = True ;MissingValues excluded
+      res1@tmXBMajorLengthF            = 0.01
+
+      res1@tiXAxisString               = tihist
+      res1@gsnHistogramMinMaxBinsOn    = False
+      res1@tiYAxisOffsetXF             = 0.005
+      res1@tiXAxisOffsetYF             = 0.005
+      
+      nbin  = toint((hists(1)-hists(0))/2.5+1)
+      
+      res1@gsnHistogramClassIntervals  = fspan(hists(0),hists(1),nbin)
+      if histclm then
+       
+	      pct1=dimsizes(ndtooned(tmp))/100.
+	      stats=stat_dispersion(ndtooned(tmp),False)
+	      plot1=gsn_histogram(wks,ndtooned(tmp),res1)
+	   else
+	     
+	      stats=stat_dispersion(ndtooned(data),False)
+	      pct1=dimsizes(ndtooned(data))/100.
+	      plot1=gsn_histogram(wks,ndtooned(data),res1)
+	   end if  
+  		tmYLLabels  = ispan(0,npct,1);(/0,1,2,3,4,5,6,7/);
+      tmYLValues  = tmYLLabels*pct1;(/0,pct1,pct1*2,pct1*3,pct1*4,pct1*5,pct1*6,pct1*7/)
+      
+      getvalues plot1
+            "tmXBLabels"             : tmXBLabels
+            "tmXBValues"             : tmXBValues
+            "tmYLLabelFontHeightF"   : fheight
+      end getvalues       
+      setvalues plot1              
+                         "tmXBMode"  :   "Explicit"
+                         "tmXBValues":   tmXBValues(::10)
+                         "tmXBLabels":   tmXBLabels(::10)
+
+                         "trYMaxF"   :   pct1*npct
+                         "tmYLMode"  :   "Explicit"
+                         "tmYLValues":   tmYLValues(::2)
+                         "tmYLLabels":   tmYLLabels(::2)
+
+                         "tmYROn"           :   False
+                         "tiYAxisString"    : "Percent"
+        end setvalues
+
+        statstr = (/monstr(mon-1),\
+                "Mean = "+sprintf("%.2f",stats(0)),\
+                "Median = "+sprintf("%.2f",stats(8)),\
+                "Min = "+ sprintf("%.2f",stats(2)),\
+                "Max = "+sprintf("%.2f",stats(14))/)
+                 print(statstr)
+                 ntext = dimsizes(statstr)
+
+
+            txres               = True
+            txres@txFontHeightF = fheight
+            txres@txJust        = "BottomLeft"
+
+           
+
+            xp              = tmXBValues(1)
+            yp              = (npct-0.5)*pct1;(npct-1)*pct1
+         dum1=gsn_add_text(wks,plot1,statstr(0),xp,0.9825*yp,txres)
+         dum2=gsn_add_text(wks,plot1,statstr(1),xp,0.90*yp,txres)
+         dum3=gsn_add_text(wks,plot1,statstr(2),xp,0.82*yp,txres)
+         dum4=gsn_add_text(wks,plot1,statstr(3),xp,0.74*yp,txres)
+         dum5=gsn_add_text(wks,plot1,statstr(4),xp,0.66*yp,txres)
+	
+		draw(plot1)
+		frame(wks)
+  		
+	end if ;plt Hist
+    ;print(tmXBValues)
+
+	print("done")
+
+
+end
+;if (isbigendian() ) then
+;	setfileoption("bin","ReadByteOrder","BigEndian")
+;end if
+
+;tmp   = dataAvg(hour,:,:)
+;delete(dataAvg)
+;tmp  = data(day,hour,:,:) 
+;tmp  = addmeta(tmp,dimsz(2:3),dimNames(2:3),geoinfo,longname,units,-1,-1)
+;day		 = 12  
+;hour	 = 17 
+;nrec	 = (day-1)*nhour+hour
+
+   ;res@mpCenterLonF        = 0.5*(res@mpMinLonF+res@mpMaxLonF )
+   ;res@mpFillOn            = False
+   ;res@lbOrientation       = "Vertical"
+   ;res@lbLabelAutoStride   = True    
+   ;res@trGridType          = "TriangularMesh"   ; Necessary b/c lat, lon
+  ;res@cnFillMode          = "CellFill"  
+ ;res1@gsnHistogramSelectNiceIntervals = False
+  ;res1@gsnHistogramNumberOfBins        = 61 
+  ;res1@gsnHistogramComputePercentages	= True
+   ;res1@gsnHistogramPercentSign		= True

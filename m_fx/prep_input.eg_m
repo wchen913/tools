@@ -1,0 +1,857 @@
+%----------------------------------------------------------------------
+function prepare_input()
+%----------------------------------------------------------------------
+   
+   %-- To clear the **persistent** varialbes in the SUB functions.
+   %   This won't affect the upper level function's workspace.
+   clear functions
+%==========================================
+ %--- Specify times and sats,  Method-1      
+   yrV  = [2002];
+   monV = [7];%[1:12];%[2,3,5,7,10];
+   dayV = [];
+   satV = {'terra','aqua'}; %{'terra'};%
+%==========================================
+   %yrV=[2005]; monV=[1:7]; dayV=[]; satV={'terra'};
+   %yrV=[2012]; monV=[1:12]; dayV=[]; satV={'aqua'};
+
+   timeV = [];
+   ct = 0;
+   for iy=yrV
+      for im=monV
+         if isempty(dayV) dayS = 1:eomday(iy,im);
+         else             dayS = dayV; end
+         for id=dayS
+            ct = ct+1;
+            timeV(ct) = iy*1000 + datenum(iy,im,id)-datenum(iy,1,0);
+         end
+      end
+   end
+%disp(timeV)
+%keyboard
+%{
+ %--- Specify times and sats,  Method-2
+   %      Method-2 will override Method-1 !!!
+   %
+   yr = 2011;
+   dy = [001:365];
+   dy =[174:365];
+   %timeV = yr*1000+dy; satV={'terra'};
+   %timeV = yr*1000+dy; satV={'aqua'};
+   timeV = yr*1000+dy; satV={'terra','aqua'};
+%}
+%==========================================================================
+ %-------
+   %prepOutPath = '/aosc/helios2/ytma/data_helios2/sat/MODIS/test_minOverlap/';
+   %prepOutPath = '/aosc/helios2/ytma/data_helios2/sat/MODIS/WUSA2/';
+   %prepOutPath = '/aosc/helios2/ytma/data_helios2/sat/MODIS/WUSA3.0/';
+
+   %---121219: helios2 died, reproduce aqua 2005 on pkgroup1
+   %prepOutPath = '/data/pkgroup1/ytma/data_pkgroup1/sat/MODIS/WUSA3.0/';
+   %prepOutPath = '/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg_odir/';
+   %prepOutPath = '/aosc/helios2/ytma/data_helios2/sat/MODIS/1deg/';
+
+   %--- For Year 2014 by Feb,2015 (seaice data are not prepared)
+   %prepOutPath = '/data/crash/wchen/MODIS/ShortWave/Prep_Input_Results/case_seaiceNo/';
+   %---Reprocess 2002/07-2010/06
+   %prepOutPath = '/data/crash/wchen/MODIS/ShortWave/Prep_Input_Results/case_1deg_Reprocess/';
+   %---Continue Run 2016-current by wen chen (2021.03)
+   prepOutPath = '/data/srb8/wchen/SW/1deg/preinput/';
+%==========================================================================
+  
+
+   %-----  
+   timeV = sort(timeV); %sort timeV in ascending order
+
+
+   %===== Run the component perperation. if neccessary.
+   %      Components are independont to each other at this stage.
+   %=================
+   gridRes = 1.0;
+   %gridRes = 0,05;
+   %=================
+%==========================================================================
+% 
+%     prep_cloud(   timeV, satV, prepOutPath,'saveSRC', gridRes );
+    %prep_aerosol( timeV, satV, prepOutPath,'saveSRC', gridRes );
+    %prep_profile( timeV, satV, prepOutPath,'saveSRC', gridRes );
+    prep_albedo(  timeV, prepOutPath,'saveSRC', gridRes );
+%---------------------------------------------------------------------- 
+%   prep_profile_insMu0( timeV, satV, prepOutPath,'saveSRC', gridRes );
+% 
+% disp('not continue')   
+% keyboard
+%return   
+%==========================================================================
+
+
+
+   MISG = -9999.;
+   inPath0 = prepOutPath;
+   resultPath0 = [prepOutPath, 'input/'];
+   
+
+   %-- save the source code for documentary purpose.
+   saveSRC = 'save';%[] %if ~=[] save this .m file.
+   if ~isempty(saveSRC)
+      [st,i]=dbstack; %get current .m filename and funciton name.
+      crntFile = st(1).file;
+      timeStr = datestr(now,'yymmddHHMM');
+      %mkdir(resultPath0,['src',timeStr]);
+      copyfile( crntFile, [resultPath0,'/src/',crntFile,'.',timeStr]);
+   end
+
+
+
+   for isat = 1:length(satV)
+      satName = satV{isat};
+         
+      if     strcmp(satName,'terra') satStr='MOD';
+      elseif strcmp(satName,'aqua')  satStr='MYD';
+      end
+
+      for atv = timeV %timeV=[2009002]
+         
+         iyr  = fix(atv/1000);
+         doy  = mod(atv,1000);
+         tdv  = datevec( datenum(iyr,1,0)+doy );
+         imon = tdv(2);
+         idy  = tdv(3);
+      
+         yyyy = num2str(iyr, '%04d');
+         mm   = num2str(imon,'%02d');
+         dd   = num2str(idy, '%02d');
+         ddd  = num2str(doy, '%03d');
+
+
+         cldPath = [inPath0,'/cloud/',yyyy,'/',satName,'/'];
+         nameList = dir([cldPath,'/','cld.',satName,'.',yyyy,ddd,'.*.dat']);
+         if (isempty(nameList)) continue; end
+         nFiles = length(nameList);
+      
+         for ifl = 1:nFiles
+      
+            fileName = nameList(ifl).name;
+            hhmm  = fileName(end-7:end-4); %for 1deg, hhmm='9999'
+            hrmin = str2num(hhmm);
+         
+            disp(fileName)
+
+
+            %--- Get cloud input data.
+            %    Cloud input data may be missing.
+            %
+            [cldLat,cldLon,...
+             ctp, wfrc,wcod,wcre, ifrc,icod,icre, tfrc ] =...
+            get_cloud(...
+                      iyr, imon, idy, hrmin, doy, satName, inPath0);
+            if(isempty(cldLat) || isempty(cldLon))
+               disp(sprintf('--- prep_input(): empty cloud data! %s',fileName))
+               continue;
+            end
+
+
+            %--- Get aerosol input data
+            %    Aerosol input data may be missing, even after 
+            %    filled with MISR data.
+            %    130219: after new filled scheme, should be NO missing now!
+            %
+            [aod] =...
+            get_aerosol(...
+                        iyr, imon, idy, hrmin, doy, satName,...
+                        inPath0, cldLat, cldLon, gridRes);
+            if (isempty(aod))
+               aod = nan(size(cldLat));
+            end
+
+
+            %--- Get pWater, O3 and other auxilary data
+            %    No missing pixels except surface pressure data.
+            %
+            [mu0, wtr, uo3, elv, prs] = ...
+            get_profile(...
+                        iyr, imon, idy, hrmin, doy, satName,...
+                        inPath0, cldLat, cldLon);
+            if (isempty(mu0))
+               disp(sprintf('--- prep_input(): empty profile data! %s',fileName))
+               continue;
+            end
+
+
+            %--- Get sruface albedeo data
+            %    Albedo data may be missing, but only in the polar 
+            %    night region.
+            %
+            [sfc, alb] = ...
+            get_alb(...
+                    iyr, imon, idy, hrmin, doy, satName,...
+                    inPath0, cldLat, cldLon, mu0);
+            %if (isempty())
+            %end
+
+%keyboard;return
+
+            %-- output prepared input data
+            %
+            resultPath = [resultPath0,'/',yyyy,'/',satName,'/'];
+            outFileName = [resultPath,...
+                   'modis.',satName,'.',yyyy,ddd,'.',hhmm,'.input'];
+
+            % when combine single with double, all converte to single.
+            % wnen combine integer with others , all converte to integer.
+            dM = cat( 3,...
+                      cldLat, cldLon,...
+                      ctp, wfrc,wcre,wcod,  ifrc,icre,icod, tfrc,...
+                      aod, mu0, wtr, uo3, elv, prs, ...
+                      single(sfc), alb );
+
+            dM = permute(dM,[3,1,2]); %[nVar,nLon,nLat]
+
+            dM(isnan(dM)) = MISG;
+
+            fid = fopen(outFileName,'w');
+               %fwrite(fid, ndims(cldLat), 'int32');
+               fwrite(fid, size(cldLat), 'int32');
+               fwrite(fid, MISG, 'float32');
+               fwrite(fid, dM,   'float32'); %1
+            fclose(fid);
+
+         end %--for ifl = 1:numFiles
+      
+      end %--for atv = timeV
+
+   end %--for isat = satV
+
+
+end
+
+
+
+%---------------------------------------------------------------------
+function [cldLat, cldLon, ctp, wfrc,wcod,wcre, ifrc,icod,icre, tfrc] = ...
+         get_cloud( iyr, imon, idy, hrmin, doy, satName, inPath0);
+%---------------------------------------------------------------------
+
+   yyyy = num2str(iyr,  '%04d');
+   mm   = num2str(imon, '%02d');
+   dd   = num2str(idy,  '%02d');
+   ddd  = num2str(doy,  '%03d');
+   hhmm = num2str(hrmin,'%04d');
+
+
+   %-- spectial cases
+   %terra20051261705 = strcmp(satName,'terra') &&...
+   %                   iyr==2005 &&...
+   %                   doy==126 &&...
+   %                   hrmin==1705; %cloud drop size has problem!
+
+   inPath = [inPath0,'cloud/',yyyy,'/',satName,'/'];
+   inFileName = [inPath,'cld.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+   fid = fopen(inFileName,'r');
+      cldNDims = fread(fid, 1, 'int32');
+      cldDims  = fread(fid, cldNDims,  'int32');
+      cldLat   = fread(fid, prod(cldDims), 'float32');
+      cldLon   = fread(fid, prod(cldDims), 'float32');
+      ctp      = fread(fid, prod(cldDims), 'float32');
+      wfrc     = fread(fid, prod(cldDims), 'float32');
+      wcre     = fread(fid, prod(cldDims), 'float32');
+      wcod     = fread(fid, prod(cldDims), 'float32');
+      ifrc     = fread(fid, prod(cldDims), 'float32');
+      icre     = fread(fid, prod(cldDims), 'float32');
+      icod     = fread(fid, prod(cldDims), 'float32');
+      tfrc     = fread(fid, prod(cldDims), 'float32');
+   fclose(fid);
+
+
+   cldDims = cldDims';
+   cldLat = reshape(cldLat, cldDims);
+   cldLon = reshape(cldLon, cldDims);
+   ctp    = reshape(ctp,    cldDims);
+   wfrc   = reshape(wfrc,   cldDims);
+   wcre   = reshape(wcre,   cldDims);
+   wcod   = reshape(wcod,   cldDims);
+   ifrc   = reshape(ifrc,   cldDims);
+   icre   = reshape(icre,   cldDims);
+   icod   = reshape(icod,   cldDims);
+   tfrc   = reshape(tfrc,   cldDims);
+   
+%keyboard   
+end
+
+
+
+%---------------------------------------------------------------------
+function [aodOut] = ...
+         get_aerosol( iyr, imon, idy, hrmin, doy, satName, inPath0,...
+                      cldLat, cldLon, gridRes );
+%---------------------------------------------------------------------
+
+   yyyy = num2str(iyr,  '%04d');
+   mm   = num2str(imon, '%02d');
+   dd   = num2str(idy,  '%02d');
+   ddd  = num2str(doy,  '%03d');
+   hhmm = num2str(hrmin,'%04d');
+
+
+
+   %--- missing aerosol swath data. 
+   %    cloud swath data availabe but without corresponding aerosol.
+   if ismember(lower([satName,yyyy,ddd,hhmm]),...
+               {'aqua20091961840',...
+                'aqua20091962010',...
+                'aqua20091962150',...
+                'aqua20091962155',...
+                'aqua20040620725',...
+               })
+      aod5km = [];
+      return
+   end
+
+
+   inPath = [inPath0,'aerosol/',yyyy,'/',satName,'/'];
+   inFileName = [inPath, 'aer.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+   fid = fopen(inFileName,'r');
+      aerNDims = fread(fid, 1, 'int32');
+      aerDims  = fread(fid, aerNDims, 'int32');
+      aerLat   = fread(fid, prod(aerDims), 'float32');
+      aerLon   = fread(fid, prod(aerDims), 'float32');
+      aod      = fread(fid, prod(aerDims), 'float32');
+   fclose(fid);
+
+   %aerDims = aerDims';
+   %aerLat = reshape(aerLat, aerDims);
+   %aerLon = reshape(aerLon, aerDims);
+   %aod    = reshape(aod,    aerDims);
+
+
+   %-- to check if dim. of aerosol swath is exactly half of the dim. of cloud swath.
+   %
+   if gridRes==1.0
+
+      if any( aerDims' ~= size(cldLat) ) 
+         disp(sprintf('--- %s: aer dims and cld dims dont match!',mfilename))
+         keyboard
+      end
+
+      aodOut = reshape(aod,size(cldLat));
+      
+   elseif gridRes==0.05   
+
+      if any( aerDims'*2 ~= size(cldLat) ) 
+         disp(sprintf('--- %s: aer dims and cld dims dont match!',mfilename))
+         keyboard
+      end
+  
+      %-- scale 10km aerosol grid to 5km grid
+      %   size(aod)=[nx*ny,1]
+      nx = aerDims(1);
+      ny = aerDims(2);
+      aod5km = repmat( aod,[4,1] ); %[nx*ny*4,1]
+      aod5km = reshape(aod5km, [nx,ny,2,2]);
+      aod5km = permute(aod5km, [3,1,4,2]);
+      aod5km = reshape(aod5km, [2*nx,2*ny]);
+      
+      audOut = aod5km;
+      
+   end %if gridRes==1.0
+
+
+
+
+%   %-- interplate to [cldLat,cldLon]
+%   %   cldLat and cldLon should not have any NaN. NaN in cldLat and cldLon
+%   %   should have been filled in prep_cloud().
+%   %
+%   nz = ~isnan(aerLat) & ~isnan(aerLon) & ~isnan(aod); %remove nan points.
+%   latV = aerLat(nz);
+%   lonV = aerLon(nz);
+%   valV = aod(nz);
+%              
+%   F = TriScatteredInterp( lonV,latV,valV );
+%   aod = F(cldLon,cldLat); %[nLon,nLat]
+%
+%   %-- after TriScatterdInterp(), there will be some NaN pixel
+%   %   don't yet know why.
+%   aod(aod<0) = NaN;
+%   aod(isnan(aod)) = nanmean(nanmean(aod));
+
+
+%keyboard
+end
+
+
+%---------------------------------------------------------------------
+function [mu0,wtr,uo3,elv,prs] = ...
+         get_profile( iyr, imon, idy, hrmin, doy, satName, inPath0,...
+                      cldLat, cldLon );
+%---------------------------------------------------------------------
+
+   yyyy = num2str(iyr,  '%04d');
+   mm   = num2str(imon, '%02d');
+   dd   = num2str(idy,  '%02d');
+   ddd  = num2str(doy,  '%03d');
+   hhmm = num2str(hrmin,'%04d');
+
+
+   %-- missing data files
+   %   There is no corresponding profile data for the cloud swath time.
+   missStr = lower([satName,yyyy,ddd,hhmm]);
+   if ismember( missStr, {...
+                           'terra20043651750',...
+                           'terra20043651755',...
+                         })
+      mu0=[];
+      wtr=[];
+      uo3=[];
+      elv=[];
+      prs=[];
+      return
+   end
+
+
+   inPath = [inPath0,'profile/',yyyy,'/',satName,'/'];
+   inFileName = [inPath, 'pfl.',satName,'.',yyyy,ddd,'.',hhmm,'.dat'];
+   fid = fopen(inFileName,'r');
+      pflNDims = fread(fid, 1, 'int32');
+      pflDims  = fread(fid, pflNDims, 'int32');
+      pflLat   = fread(fid, prod(pflDims), 'float32');
+      pflLon   = fread(fid, prod(pflDims), 'float32');
+      mu0      = fread(fid, prod(pflDims), 'float32');
+      wtr      = fread(fid, prod(pflDims), 'float32');
+      uo3      = fread(fid, prod(pflDims), 'float32');
+      elv      = fread(fid, prod(pflDims), 'float32');
+      prs      = fread(fid, prod(pflDims), 'float32');
+   fclose(fid);
+
+   pflDims = pflDims';
+   pflLat = reshape(pflLat, pflDims);
+   pflLon = reshape(pflLon, pflDims);
+   mu0    = reshape(mu0,    pflDims);
+   wtr    = reshape(wtr,    pflDims);
+   uo3    = reshape(uo3,    pflDims);
+   elv    = reshape(elv,    pflDims);
+   prs    = reshape(prs,    pflDims);
+   
+   %--- check lat, lon
+   ymdhmStr = lower([satName,yyyy,ddd,hhmm]);
+   if ismember( ymdhmStr, {'terra20030651935',... %lat,lon little mismatch with cloud swath.
+                           'terra20030651940',... %lat,lon little mismatch with cloud swath.
+                           'terra20031201940',... %lat,lon little mismatch with cloud swath.
+                           'terra20031201945',... %lat,lon little mismatch with cloud swath.
+                           'terra20032121645',... %lat,lon little mismatch with cloud swath.
+                           'terra20032121650',... %lat,lon little mismatch with cloud swath.
+                           'terra20032121655',... %lat,lon little mismatch with cloud swath.
+                           'terra20033041850',... %lat,lon little mismatch with cloud swath.
+                           'terra20033041855',... %lat,lon little mismatch with cloud swath.
+                          } )
+      %don't check the lat, lon for these exceptions.
+   else
+
+      latdif = pflLat - cldLat;
+      londif = pflLon - cldLon;
+
+      if abs(nanmean(latdif(:)))>0.01 ||...
+         abs(nanmean(londif(:)))>0.01
+         disp('---get_profile_swath(): pfl. lat/lon and cld. lat/lon dont match!')
+         keyboard
+      end
+
+   end      
+
+%keyboard
+end
+
+
+%---------------------------------------------------------------------
+function [sfc, alb ] = ...
+         get_alb( iyr, imon, idy, hrmin, doy, satName, inPath0,...
+                  cldLat, cldLon, mu0 )
+%---------------------------------------------------------------------
+
+   %origRes = 1/60;
+   %sfcTypRes  = 0.05; %original res.=1minute, in degree.
+   %sfcTypLat1 = 90-origRes/2-(smp1-1)*origRes; %90-alb16Res/2;
+   %sfcTypLon1 = -180+origRes/2+(smp1-1)*origRes; %-180+alb16Res/2;
+
+   persistent First
+   persistent crntD16
+   persistent crntYrdoy
+   persistent sfcTyp sfcTypRes sfcTypLat1 sfcTypLon1 sfcTypDims
+   persistent alb16
+   persistent dSnow dIce
+   
+   if isempty(First)
+      First=true;
+   end
+
+   if isempty(crntD16)
+      crntD16=-1;
+   end
+   
+   if isempty(crntYrdoy)
+      crntYrdoy=-1;
+   end
+
+
+
+   yyyy = num2str(iyr,  '%04d');
+   mm   = num2str(imon, '%02d');
+   dd   = num2str(idy,  '%02d');
+   ddd  = num2str(doy,  '%03d');
+   hhmm = num2str(hrmin,'%04d');
+
+      
+   %----- read in the sfcType data
+   %   IGBP_Land_Cover_Type (720, 4)
+   %   8-bit integer,    10800 x 21600
+   %   Number of attributes = 22
+   %   long_name = IGBP Land Cover Classification Type
+   %   units = class number
+   %   valid_range = 0,-2
+   %   _FillValue = -1
+   %        0  water = 0
+   %        1  evergreen needleleaf forest = 1
+   %        2  evergreen broadleaf forest = 2
+   %        3  deciduous needleleaf forest = 3
+   %        4  deciduous broadleaf forest = 4
+   %        5  mixed forests = 5
+   %        6  closed shrubland = 6
+   %        7  open shrublands = 7
+   %        8  woody savannas = 8
+   %        9  savannas = 9
+   %        10 grasslands = 10
+   %        11 permanent wetlands = 11
+   %        12 croplands = 12
+   %        13 urban and built-up = 13
+   %        14 cropland/natural vegetation mosaic = 14
+   %        15 snow and ice = 15
+   %        16 barren or sparsely vegetated = 16
+   %        -2 unclassified = -2
+   %
+   if First
+      inFileName = [inPath0, 'albedo/sfctyp.dat'];
+      fid = fopen(inFileName,'r');
+         sfcTypNDims = fread(fid, 1, 'int32');
+         sfcTypDims  = fread(fid, sfcTypNDims, 'int32');
+         sfcTypRes   = fread(fid, 1, 'float32');
+         sfcTypLat1  = fread(fid, 1, 'float32');
+         sfcTypLon1  = fread(fid, 1, 'float32');
+         sfcTyp      = fread(fid, prod(sfcTypDims), 'int8'); %[NX*NY, 1]
+      fclose(fid);
+      
+      %sfcTyp = reshape(sfcTyp, sfcTypDims); %[NX,NY]
+
+      First = false;
+   end
+
+   %-- Get subscripts and indeces for current swath.
+   %
+   subs = ~isnan(cldLat) & ~isnan(cldLon); %subs for the swath pixel with valid lat and lon.
+   sLat = cldLat(subs);
+   sLon = cldLon(subs);
+   sLon(sLon>180) = sLon(sLon>180)-360; %lon=-180..180
+
+   sfcTypNLons = sfcTypDims(1);
+   sfcTypNLats = sfcTypDims(2);     
+ 
+   iLon = round( (sLon-sfcTypLon1)./sfcTypRes + 1 );
+   iLat = round( (sfcTypLat1-sLat)./sfcTypRes + 1 );
+   iLon(iLon>sfcTypNLons) = mod( iLon(iLon>sfcTypNLons),sfcTypNLons );
+   iLat(iLat>sfcTypNLats) = sfcTypNLats;
+
+   inds = sub2ind( sfcTypDims,iLon,iLat ); %grids in the sfcTyp data corresponed to the swath pixels; 1D vector index
+
+   %-- take out the surface type for the current swath.
+   sSfc = sfcTyp(inds);     %swath surface type; [length(inds),1]
+   landpix = sSfc~=0 & sSfc~=-2; %land pixels are value=1..16
+   wtrpix  = sSfc==0;
+
+
+
+
+   %----- read in 16-day albedo data (non-snow albedo for land only)
+   %   assume 001.dat covers 001 to 016.
+   %   data is multi-year mean over 00-04.  
+   %   0.05deg. [7200,3600]=[NX,NY], single pricesion
+   %
+   d16 = fix((doy-1)/16)*16+1;
+   if d16 ~= crntD16
+
+      d16Str = num2str(d16, '%03d');
+      inFileName = [inPath0,'albedo/',yyyy,'/',...
+                    'alb16.',yyyy,d16Str,'.dat'];
+
+      fid = fopen(inFileName,'r');
+         alb16NDims = fread(fid, 1, 'int32');
+         alb16Dims  = fread(fid, alb16NDims, 'int32');
+         alb16Res   = fread(fid, 1, 'float32');
+         alb16Lat1  = fread(fid, 1, 'float32');
+         alb16Lon1  = fread(fid, 1, 'float32');
+         alb16bsVis = fread(fid, prod(alb16Dims),  'float32');
+         alb16bsNir = fread(fid, prod(alb16Dims),  'float32');
+         alb16wsVis = fread(fid, prod(alb16Dims),  'float32');
+         alb16wsNir = fread(fid, prod(alb16Dims),  'float32');
+      fclose(fid);
+
+      if alb16Res  ~= sfcTypRes  ||...
+         alb16Lat1 ~= sfcTypLat1 ||...
+         alb16Lon1 ~= sfcTypLon1
+         disp('--- prep_input(): sfcTyp and alb16 dont match!')
+         keyboard
+      end
+      
+      alb16 = [alb16bsVis,...
+               alb16bsNir,...
+               alb16wsVis,...
+               alb16wsNir ]; %[NX*NY,4]
+
+      crntD16 = d16;
+   end
+   
+   %-- take out the 16day albedo for current swath.
+   sAlb = alb16(inds,:);   %swath snow-free albedo; [length(inds,4]
+
+
+   %----- Calculate water albedo (non-ice albedo for water only).
+   %
+   sMu0 = mu0(subs);
+
+   wp = wtrpix & any(isnan(sAlb),2);
+
+   sAlb(wp,[3,4]) = 0.06; %white sky albedo for water type
+
+   wm1 = wp & sMu0>0;
+   wm2 = wp & sMu0<=0;
+   for i=1:2
+      sAlb(wm1,i) = 0.01*( 2.6./(sMu0(wm1).^1.7 + 0.065) +...
+                           15.*(sMu0(wm1)-0.1).*...
+                               (sMu0(wm1)-0.5).*...
+                               (sMu0(wm1)-1) );
+      sAlb(wm2,i) = 0.06;
+   end
+
+   %in case the water albedo out of range
+   tWtr = sAlb(wp,:); %[nWtr,4]
+   tWtr(tWtr>1) = 0.9; 
+   sAlb(wp,:) = tWtr;
+
+
+
+
+
+   
+   %-----read MODIS daily snow (snow for land only)
+   %  daily land snow
+   %  0.05deg. [7200,3600]=[NX,NY], single pricesion
+   %  snow fraction in 100%
+   %  use terra snow product.
+   %
+   yrdoy = iyr*1000+doy;
+   if yrdoy ~= crntYrdoy
+      inFileName = [inPath0,'albedo/',yyyy,'/',...
+                    'snow.comb.',yyyy,ddd,'.dat'];
+      fid = fopen(inFileName,'r');
+         dSnowNDims = fread(fid, 1, 'int32');
+         dSnowDims  = fread(fid, dSnowNDims, 'int32');
+         dSnowRes   = fread(fid, 1, 'float32');
+         dSnowLat1  = fread(fid, 1, 'float32');
+         dSnowLon1  = fread(fid, 1, 'float32');
+         dSnow      = fread(fid, prod(dSnowDims), 'float32'); %[NX*NY,1]
+      fclose(fid);
+
+      if dSnowRes  ~= sfcTypRes  ||...
+         dSnowLat1 ~= sfcTypLat1 ||...
+         dSnowLon1 ~= sfcTypLon1
+         disp('--- prep_input(): sfcTyp and dayLandSnow dont match!')
+         keyboard
+      end
+
+      %Both snow and ice need this value, changed later; crntYrdoy = yrdoy;
+   end
+
+   %-- take out daily snow for current swath.
+   sSno = dSnow( inds)/100; %swath snow fraction; dSnow data in 100%; [length(inds),1]]
+   snowpix = sSno>0;
+
+
+
+   %-----read daily sea ice (sea ice for water only)
+   % ice concentration in 100%
+   % idy=99 read monthly data
+   % single precision, 0.05 deg. [7200,3600]=[NX,NY]
+   %
+   yrdoy = iyr*1000+doy;
+   if yrdoy ~= crntYrdoy
+      inFileName = [inPath0,'albedo/',yyyy,'/',...
+                    'seaice.',yyyy,ddd,'.dat'];
+      fid = fopen(inFileName,'r');
+         dIceNDims = fread(fid, 1, 'int32');
+         dIceDims  = fread(fid, dIceNDims, 'int32');
+         dIceRes   = fread(fid, 1, 'float32');
+         dIceLat1  = fread(fid, 1, 'float32');
+         dIceLon1  = fread(fid, 1, 'float32');
+         dIce      = fread(fid, prod(dIceDims), 'float32'); %[NX*NY,1]
+      fclose(fid);
+
+      if dIceRes  ~= sfcTypRes  ||...
+         dIceLat1 ~= sfcTypLat1 ||...
+         dIceLon1 ~= sfcTypLon1
+         disp('--- prep_input(): sfcTyp and dayLandIce dont match!')
+         keyboard
+      end
+
+      %Both snow and ice need this value, changed later; crntYrdoy = yrdoy;
+   end
+
+   %-- take out daily seaice for current swath.
+   sIce = dIce(inds)/100; %swath ice fraction; dIce data in 100%; [length(inds),1]]
+   icepix = sIce>0;
+
+
+
+
+
+   %----- Adjust land albedo for snow (Land only)
+   %   sfcTypRes  = 0.05; %original res.=1minute, in degree.
+   %   sfcTypLat1 = 90-origRes/2-(smp1-1)*origRes; %90-alb16Res/2;
+   %   sfcTypLon1 = -180+origRes/2+(smp1-1)*origRes; %-180+alb16Res/2;
+   %
+   %  sfcTyp:
+   %   1  evergreen needleleaf forest  % 10 grasslands
+   %   2  evergreen broadleaf forest   % 11 permanent wetlands
+   %   3  deciduous needleleaf forest  % 12 croplands
+   %   4  deciduous broadleaf forest   % 13 urban and built-up
+   %   5  mixed forests                % 14 cropland/natural vegetation mosaic
+   %   6  closed shrubland             % 15 snow and ice
+   %   7  open shrublands              % 16 barren or sparsely vegetated
+   %   8  woody savannas               % 0  water             
+   %   9  savannas                     % -2 unclassified
+   %
+   %  IGBP surface type          
+   %   1. Evrgrn. Needle For.  % 10. Grassland 
+   %   2. Evrgrn. Broad For.   % 11. Wetlands 
+   %   3. Decid. Needle For.   % 12. Crops
+   %   4. Decid. Broad For.    % 13. Urban 
+   %   5. Mixed Forest         % 14. Crop/Mosaic 
+   %   6. Closed Shrubs        % 15. Snow/Ice 
+   %   7. Open Shrubs          % 16. Barren/Desert
+   %   8. Woody Savannas       %! 17. Water 
+   %   9. Savannas             %! 18. Tundra  
+   %   
+   %  snowAlbIGBP(16,4) 
+   %   2 sky(white and black) * 2 band(0.3-0.7;0.7-5.0)
+   %   if surface==18,set up as 7; 17 is ocean: 0.07; 
+   %                 
+   snowAlbIGBP = [ ...
+              % for black-sky
+              0.35, 0.27, 0.47, 0.42, 0.42, 0.44, 0.63, 0.53,...
+              0.57, 0.65, 0.25, 0.49, 0.46, 0.58, 0.96, 0.70;... %VIS !0.90,0.70/
+              0.24, 0.23, 0.31, 0.28, 0.29, 0.29, 0.41, 0.36,...
+              0.38, 0.42, 0.21, 0.33, 0.31, 0.41, 0.59, 0.46;... %NIR
+              % for white-sky
+              0.31, 0.44, 0.39, 0.35, 0.32, 0.42, 0.68, 0.44,...
+              0.57, 0.70, 0.66, 0.69, 0.50, 0.59, 0.95, 0.79;... %VIS !0.89,0.79/
+              0.24, 0.33, 0.27, 0.27, 0.25, 0.30, 0.44, 0.30,...
+              0.39, 0.48, 0.44, 0.47, 0.34, 0.41, 0.57, 0.51];   %NIR
+   snowAlbIGBP = snowAlbIGBP'; %[16,4]
+   
+   %-- adjust land albedo with snow coverage
+   %
+   lsp = snowpix & landpix;
+
+   snowAlb = snowAlbIGBP( sSfc(lsp),: );
+   for i=1:size(sAlb,2)
+      sAlb(lsp,i) = snowAlb(:,i).*sSno(lsp) + sAlb(lsp,i) .* (1-sSno(lsp));
+   end
+
+
+
+
+
+%test
+%{
+
+   %----- Adjust water albedo for sea ice
+   %   alb16 = [alb16bsVis,...
+   %            alb16bsNir,...
+   %            alb16wsVis,...
+   %            alb16wsNir ]; %[NX*NY,4]
+   %
+   iceAlb = [];
+   
+   %--
+   wip = icepix  & wtrpix;
+   wsp = snowpix & wtrpix;
+
+/// not yet done 121015
+   snowAlb = snowAlbIGBP( sSfc(lsp),: );
+   for i=1:size(sAlb,2)
+      sAlb(lsp,i) = snowAlb(:,i).*sSno(lsp) + sAlb(lsp,i) .* (1-sSno(lsp));
+   end
+   
+%}
+
+   %-----
+   if yrdoy ~= crntYrdoy
+      crntYrdoy = yrdoy;
+   end
+
+
+   %----- Return surface albedo that has been adjused by snow and seaice.
+   %
+   alb = nan( prod(size(cldLat)), 4 );
+   alb(find(subs),:) = sAlb;
+   alb = reshape(alb, [size(cldLat),4]);
+   
+   sfc = nan( size(cldLat) );
+   sfc(find(subs)) = sSfc;
+
+%keyboard
+end
+
+
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+%+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+%{
+C                       ** OPTICAL PARAMETERS FOR SNOW-GRAIN SIZE OF
+C                       ** 50 MICRONS (PURE, FRESH SNOW)
+      DATA  Onemom / 2.22E-6, 2.6E-6, 6.4E-6, 1.6E-5, 2.7E-3 /
+      DATA  Asympa / 0.885, 3 * 0.888, 0.894 /
+      DATA  Prvtab / -1 /
+
+
+
+C
+C                       ** COMPUTE ALBEDOS OF SEMI-INFINITE SNOW.
+C                       ** EQS. 4 AND 7 OF WW.
+C
+         DO 20 I = 1, Nint
+            Ome    = 1. - Onemom( I )
+            Omestr = ( 1.-Asympa(I) *Asympa(I) ) * Ome /
+     &               ( 1.-Asympa(I) *Asympa(I) *Ome )
+            Asystr = Asympa( I ) / ( 1.+Asympa(I) )
+            Astar  = 1. - Omestr * Asystr
+            Bstar  = Asystr / Astar
+            Zai    = Sqrt( 3. *Astar* (1.-Omestr) )
+            P      = 2. * Zai / ( 3. *Astar )
+C
+            Snowdr( I ) = ( Omestr* (1.-Bstar*Zai*Sunmu) ) /
+     &                    ( (1.+P) * (1.+Zai*Sunmu) )
+            Snowdf( I ) = ( (1.+Bstar)/ (Zai*Zai) * (Zai-Alog(1.+Zai))-
+     &                    Bstar/2. ) * ( 2. *Omestr ) / ( 1.+P )
+            Diralb( I ) = Snowdr( I )
+            Difalb( I ) = Snowdf( I )
+20       CONTINUE
+
+%}
+

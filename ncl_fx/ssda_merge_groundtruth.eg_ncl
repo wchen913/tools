@@ -1,0 +1,86 @@
+
+begin
+;***********************************************
+; get variable names from grib file
+;***********************************************
+    vName = "ssda"
+  
+     
+    StOrg = "SURFRAD"
+	 
+    StLon = (/-116.018,-88.37,-89.97,-105.10,-105.237,-77.93,-96.62/)
+    StLat = (/  36.626, 40.06, 34.25,  48.31,  40.125, 40.72, 43.73/)
+    stid  = (/   "dra", "bon", "gwn",  "fpk",   "tbl", "psu", "sxf"/)
+    nSt      = dimsizes(StLon)
+    
+    yyyymmdd = yyyymmdd_time(2014, 2014, "integer")
+    indts    = ind(yyyymmdd.eq.20140101)
+    indte    = ind(yyyymmdd.eq.20141231)
+    TIME    = yyyymmdd(indts:indte)              
+    ntime   = dimsizes(TIME)
+    UNDEF   = -999.
+    
+    tmp_out			= new((/dimsizes(yyyymmdd),nSt/),"float",UNDEF)
+    data_out		= new((/ntime,nSt/),"float",UNDEF)
+  	data_out!0		= "time"
+  	data_out&time  	= TIME
+  	data_out!1 	 	= "site"
+ 	data_out&site   = ispan(1,nSt,1)
+ 	 
+ 	  pth = "/data/srb3/wchen/Groundtruth/SURFRAD/daily/Tshift/"
+ 	 ;pth = "./Nshift/"
+ 	;------------------------------------
+ 	; eg /data/srb3/wchen/Groundtruth/SURFRAD/daily/Tshift/ssda_daily_SURFRAD_dra_2013.dat
+	 print("------- Extract Data ----- ") 	
+	 do iSt	= 0,nSt-1
+	    do iyr = 2014,2014
+	    	f	  = pth+"ssda_daily_"+StOrg+"_"+stid(iSt)+"_"+iyr+".dat"
+	    	print(f)
+	    	ymd  := yyyymmdd_time(iyr,iyr,"integer")
+	    	ndys  = dimsizes(ymd)
+	    	tmp  := fbindirread(f, 0, ndys, "float")
+	    	inds = ind(yyyymmdd.eq.ymd(0))
+    		inde = ind(yyyymmdd.eq.ymd(ndys-1))
+    		print(inds+" "+inde)
+    		tmp_out(inds:inde,iSt) = (/tmp/)
+	    end do
+    
+   end do ;do iSt
+    data_out = (/tmp_out(indts:indte,:)/)  
+	printMinMax(data_out,True)	 
+	printVarSummary(data_out)
+;exit
+	print("------------ Output Data In NetCDF format-------------")
+			outpth	= "./"
+			ofname = vName+"_"+StOrg+"_"+nSt+"st"+"_daily_"+\
+			         TIME(0)+"_"+TIME(ntime-1)+"_Nshift.nc"			 
+        	print(outpth+ofname)
+	       ;exit	 
+			delete(data_out@_FillValue)
+			system("/bin/rm -f "+outpth+ofname)
+    		fod     		= addfile(outpth+ofname,"c")
+        	fod->latst  	= tofloat(StLat)
+			fod->lonst  	= tofloat(StLon)
+   	        fod->$vName$ 	= data_out
+   		    delete(fod)
+			delete(data_out) 
+end
+  ;ddd     = day_of_year(year, month, day) 
+   ;yyyyddd = year*1000 + ddd   
+    
+   ;nhar    = 4        
+   ;xClmDay = clmDayTLL(ssda, yyyyddd)     
+   ;printVarSummary(xClmDay) 
+   ;printMinMax(xClmDay,True)           
+   
+   ;xClmDay_sm = smthClmDayTLL(xClmDay, nhar)
+   ;printVarSummary(xClmDay_sm)
+
+   ;yClmDay = clmDayTLL(dswrf, yyyyddd)     
+   ;printVarSummary(yClmDay) 
+   ;printMinMax(yClmDay,True)           
+   
+   ;yClmDay_sm = smthClmDayTLL(yClmDay, nhar)
+   ;printVarSummary(yClmDay_sm)
+
+
